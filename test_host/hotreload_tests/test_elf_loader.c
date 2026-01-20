@@ -515,3 +515,112 @@ TEST_CASE("elf_loader_allocate rejects context without layout", "[elf_loader][al
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
 }
+
+// ============================================================================
+// Section Loading tests
+// ============================================================================
+
+TEST_CASE("elf_loader_load_sections succeeds after allocation", "[elf_loader][load]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_load_sections copies data to RAM", "[elf_loader][load]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Fill RAM with known pattern before loading
+    memset(ctx.ram_base, 0xCC, ctx.ram_size);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // After loading, RAM should NOT be all 0xCC (data was copied)
+    uint8_t *ram = (uint8_t *)ctx.ram_base;
+    bool found_non_cc = false;
+    for (size_t i = 0; i < ctx.ram_size; i++) {
+        if (ram[i] != 0xCC) {
+            found_non_cc = true;
+            break;
+        }
+    }
+    TEST_ASSERT_TRUE_MESSAGE(found_non_cc, "Section data was not copied to RAM");
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_load_sections rejects NULL context", "[elf_loader][load]")
+{
+    esp_err_t err = elf_loader_load_sections(NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, err);
+}
+
+TEST_CASE("elf_loader_load_sections rejects context without allocation", "[elf_loader][load]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Skip allocation - load should fail
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, err);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}

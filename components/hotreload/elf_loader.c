@@ -228,8 +228,67 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
 
 esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
 {
-    // TODO: Implement
-    return ESP_ERR_NOT_SUPPORTED;
+    if (ctx == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Memory must be allocated first
+    if (ctx->ram_base == NULL) {
+        ESP_LOGE(TAG, "RAM not allocated");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
+
+    // Iterate through sections and load PROGBITS/NOBITS with ALLOC flag
+    elf_iterator_handle_t it;
+    elf_parser_get_sections_it(parser, &it);
+
+    elf_section_handle_t section;
+    int sections_loaded = 0;
+
+    while (elf_section_next(parser, &it, &section)) {
+        uint32_t type = elf_section_get_type(section);
+
+        // Only load PROGBITS and NOBITS sections
+        if (type != SHT_PROGBITS && type != SHT_NOBITS) {
+            continue;
+        }
+
+        uintptr_t vma = elf_section_get_addr(section);
+        uint32_t size = elf_section_get_size(section);
+
+        // Skip sections with address 0 (not loadable)
+        if (vma == 0) {
+            continue;
+        }
+
+        // Calculate destination in RAM
+        uintptr_t ram_offset = vma - ctx->vma_base;
+        void *dest = (uint8_t *)ctx->ram_base + ram_offset;
+
+        if (type == SHT_PROGBITS) {
+            // Copy section data from ELF to RAM
+            uintptr_t file_offset = elf_section_get_offset(section);
+            const void *src = (const uint8_t *)ctx->elf_data + file_offset;
+            memcpy(dest, src, size);
+
+            ESP_LOGD(TAG, "Loaded section: vma=0x%x size=0x%x offset=0x%x -> %p",
+                     vma, size, file_offset, dest);
+        } else {
+            // NOBITS section (.bss) - zero the memory
+            memset(dest, 0, size);
+
+            ESP_LOGD(TAG, "Zeroed BSS section: vma=0x%x size=0x%x -> %p",
+                     vma, size, dest);
+        }
+
+        sections_loaded++;
+    }
+
+    ESP_LOGI(TAG, "Loaded %d sections into RAM at %p", sections_loaded, ctx->ram_base);
+
+    return ESP_OK;
 }
 
 esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
