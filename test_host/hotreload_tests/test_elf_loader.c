@@ -421,3 +421,97 @@ TEST_CASE("elf_loader_calculate_memory_layout rejects uninitialized context", "[
     esp_err_t err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, err);
 }
+
+// ============================================================================
+// Memory Allocation tests
+// ============================================================================
+
+TEST_CASE("elf_loader_allocate succeeds after layout calculation", "[elf_loader][alloc]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // ram_base should be non-NULL after allocation
+    TEST_ASSERT_NOT_NULL(ctx.ram_base);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_allocate sets ram_base to valid memory", "[elf_loader][alloc]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Should be able to write to the allocated memory
+    memset(ctx.ram_base, 0xAA, ctx.ram_size);
+    TEST_ASSERT_EQUAL_UINT8(0xAA, ((uint8_t *)ctx.ram_base)[0]);
+    TEST_ASSERT_EQUAL_UINT8(0xAA, ((uint8_t *)ctx.ram_base)[ctx.ram_size - 1]);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_allocate rejects NULL context", "[elf_loader][alloc]")
+{
+    esp_err_t err = elf_loader_allocate(NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, err);
+}
+
+TEST_CASE("elf_loader_allocate rejects context without layout", "[elf_loader][alloc]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Skip layout calculation - allocate should fail
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, err);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}

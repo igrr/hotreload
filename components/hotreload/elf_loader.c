@@ -8,6 +8,7 @@
 #include "elf.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "elf_loader.h"
 #include "elf_parser.h"
 
@@ -194,8 +195,35 @@ esp_err_t elf_loader_calculate_memory_layout(elf_loader_ctx_t *ctx,
 
 esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
 {
-    // TODO: Implement
-    return ESP_ERR_NOT_SUPPORTED;
+    if (ctx == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Memory layout must be calculated first
+    if (ctx->ram_size == 0) {
+        ESP_LOGE(TAG, "Memory layout not calculated (ram_size == 0)");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Try allocating with EXEC capability first (IRAM - faster code execution)
+    // Use 4-byte alignment (word-aligned for Xtensa)
+    void *ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
+    if (ram == NULL) {
+        // Fall back to regular 32-bit memory (DRAM - still executable on ESP32)
+        ESP_LOGW(TAG, "EXEC memory not available, falling back to DRAM");
+        ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_32BIT);
+    }
+
+    if (ram == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes for ELF", ctx->ram_size);
+        return ESP_ERR_NO_MEM;
+    }
+
+    ctx->ram_base = ram;
+
+    ESP_LOGI(TAG, "Allocated %zu bytes at %p for ELF loading", ctx->ram_size, ram);
+
+    return ESP_OK;
 }
 
 esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
@@ -226,6 +254,11 @@ void elf_loader_cleanup(elf_loader_ctx_t *ctx)
 {
     if (ctx == NULL) {
         return;
+    }
+
+    // Free allocated RAM
+    if (ctx->ram_base) {
+        heap_caps_free(ctx->ram_base);
     }
 
     // Close the parser
