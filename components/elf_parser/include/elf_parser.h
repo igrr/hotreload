@@ -100,7 +100,7 @@ uint8_t     elf_symbol_get_vis(elf_symbol_handle_t sym);
 esp_err_t   elf_symbol_get_name(elf_symbol_handle_t sym, char *dst, size_t dst_size);
 esp_err_t   elf_symbol_get_secname(elf_symbol_handle_t sym, char *dst, size_t dst_size);
 
-/* Relocations */
+/* Relocations (REL - without addend) */
 void        elf_parser_get_relocations_it(const elf_parser_handle_t parser, elf_iterator_handle_t *it_out);
 bool        elf_reloc_next(const elf_parser_handle_t parser, elf_iterator_handle_t *it, elf_relocation_handle_t *out);
 uintptr_t   elf_reloc_get_offset(elf_relocation_handle_t rel);
@@ -110,6 +110,19 @@ uintptr_t   elf_reloc_get_sym_val(elf_relocation_handle_t rel);
 uintptr_t   elf_reloc_get_plt_addr(elf_relocation_handle_t rel);
 esp_err_t   elf_reloc_get_sym_name(elf_relocation_handle_t rel, char *dst, size_t dst_size);
 esp_err_t   elf_reloc_get_sec_name(elf_relocation_handle_t rel, char *dst, size_t dst_size);
+
+/* Relocations with addend (RELA) */
+typedef struct elf_relocation_a *elf_relocation_a_handle_t;
+
+void        elf_parser_get_relocations_a_it(const elf_parser_handle_t parser, elf_iterator_handle_t *it_out);
+bool        elf_reloc_a_next(const elf_parser_handle_t parser, elf_iterator_handle_t *it, elf_relocation_a_handle_t *out);
+uintptr_t   elf_reloc_a_get_offset(elf_relocation_a_handle_t rel);
+uintptr_t   elf_reloc_a_get_info(elf_relocation_a_handle_t rel);
+uint32_t    elf_reloc_a_get_type(elf_relocation_a_handle_t rel);
+int32_t     elf_reloc_a_get_addend(elf_relocation_a_handle_t rel);
+uintptr_t   elf_reloc_a_get_sym_val(elf_relocation_a_handle_t rel);
+esp_err_t   elf_reloc_a_get_sym_name(elf_relocation_a_handle_t rel, char *dst, size_t dst_size);
+esp_err_t   elf_reloc_a_get_sec_name(elf_relocation_a_handle_t rel, char *dst, size_t dst_size);
 
 #ifdef __cplusplus
 }

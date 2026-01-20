@@ -41,6 +41,12 @@ struct elf_relocation {
     const Elf32_Shdr *rel_shdr;
 };
 
+struct elf_relocation_a {
+    struct elf_parser *parser;
+    Elf32_Rela rela;
+    const Elf32_Shdr *rela_shdr;
+};
+
 struct elf_parser {
     elf_parser_config_t cfg;
     Elf32_Ehdr ehdr;
@@ -54,12 +60,14 @@ struct elf_parser {
     struct elf_segment _segment;
     struct elf_symbol _symbol;
     struct elf_relocation _relocation;
+    struct elf_relocation_a _relocation_a;
 
     /* iterators */
     struct elf_iterator _sections_it;
     struct elf_iterator _segments_it;
     struct elf_iterator _symbols_it;
     struct elf_iterator _relocations_it;
+    struct elf_iterator _relocations_a_it;
 };
 
 static size_t read_bytes(elf_parser_handle_t parser, size_t offset, size_t n_bytes, void *dest)
@@ -492,6 +500,120 @@ esp_err_t elf_reloc_get_sec_name(elf_relocation_handle_t rel, char *dst, size_t 
 
     // The section to be relocated is identified by sh_info
     const uint32_t sec_idx = rel->rel_shdr->sh_info;
+    const char *name = &rel->parser->shstrtab[rel->parser->shdrs[sec_idx].sh_name];
+    strncpy(dst, name, dst_size);
+    dst[dst_size - 1] = '\0';
+    return ESP_OK;
+}
+
+/* RELA Relocations (with addend) */
+void elf_parser_get_relocations_a_it(const elf_parser_handle_t parser, elf_iterator_handle_t *it_out)
+{
+    parser->_relocations_a_it = (struct elf_iterator) {
+        .section_idx = 0, .item_idx = 0
+    };
+    *it_out = &parser->_relocations_a_it;
+}
+
+bool elf_reloc_a_next(const elf_parser_handle_t parser, elf_iterator_handle_t *it, elf_relocation_a_handle_t *out)
+{
+    while ((*it)->section_idx < parser->ehdr.e_shnum) {
+        const Elf32_Shdr *shdr = &parser->shdrs[(*it)->section_idx];
+        if (shdr->sh_type == SHT_RELA) {
+            uint32_t n_relas = shdr->sh_size / shdr->sh_entsize;
+            if ((*it)->item_idx < n_relas) {
+                Elf32_Rela rela;
+                size_t offset = shdr->sh_offset + (*it)->item_idx * shdr->sh_entsize;
+                if (read_bytes((elf_parser_handle_t)parser, offset, sizeof(rela), &rela) != sizeof(rela)) {
+                    return false;
+                }
+                parser->_relocation_a = (struct elf_relocation_a) {
+                    .parser = (struct elf_parser *)parser,
+                    .rela = rela,
+                    .rela_shdr = shdr,
+                };
+                (*it)->item_idx++;
+                *out = &parser->_relocation_a;
+                return true;
+            }
+        }
+        (*it)->section_idx++;
+        (*it)->item_idx = 0;
+    }
+    return false;
+}
+
+uintptr_t elf_reloc_a_get_offset(elf_relocation_a_handle_t rel)
+{
+    return rel->rela.r_offset;
+}
+
+uintptr_t elf_reloc_a_get_info(elf_relocation_a_handle_t rel)
+{
+    return rel->rela.r_info;
+}
+
+uint32_t elf_reloc_a_get_type(elf_relocation_a_handle_t rel)
+{
+    return ELF32_R_TYPE(rel->rela.r_info);
+}
+
+int32_t elf_reloc_a_get_addend(elf_relocation_a_handle_t rel)
+{
+    return rel->rela.r_addend;
+}
+
+static esp_err_t get_sym_for_reloc_a(elf_relocation_a_handle_t rel, Elf32_Sym *sym)
+{
+    const Elf32_Shdr *symtab_shdr = &rel->parser->shdrs[rel->rela_shdr->sh_link];
+    uint32_t sym_idx = ELF32_R_SYM(rel->rela.r_info);
+    size_t offset = symtab_shdr->sh_offset + sym_idx * symtab_shdr->sh_entsize;
+
+    if (read_bytes(rel->parser, offset, sizeof(*sym), sym) != sizeof(*sym)) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+uintptr_t elf_reloc_a_get_sym_val(elf_relocation_a_handle_t rel)
+{
+    Elf32_Sym sym;
+    if (get_sym_for_reloc_a(rel, &sym) == ESP_OK) {
+        return sym.st_value;
+    }
+    return 0;
+}
+
+esp_err_t elf_reloc_a_get_sym_name(elf_relocation_a_handle_t rel, char *dst, size_t dst_size)
+{
+    if (!dst || dst_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    Elf32_Sym sym;
+    if (get_sym_for_reloc_a(rel, &sym) != ESP_OK) {
+        return ESP_FAIL;
+    }
+
+    if (sym.st_name == 0) {
+        *dst = '\0';
+        return ESP_OK;
+    }
+
+    const char *strtab = rel->parser->sym_strtabs[rel->rela_shdr->sh_link];
+    strncpy(dst, &strtab[sym.st_name], dst_size);
+    dst[dst_size - 1] = '\0';
+    return ESP_OK;
+}
+
+esp_err_t elf_reloc_a_get_sec_name(elf_relocation_a_handle_t rel, char *dst, size_t dst_size)
+{
+    if (!dst || dst_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // The section to be relocated is identified by sh_info
+    const uint32_t sec_idx = rel->rela_shdr->sh_info;
     const char *name = &rel->parser->shstrtab[rel->parser->shdrs[sec_idx].sh_name];
     strncpy(dst, name, dst_size);
     dst[dst_size - 1] = '\0';
