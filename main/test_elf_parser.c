@@ -16,7 +16,7 @@ void test_elf_parser(void)
     }
 
     esp_partition_mmap_handle_t mmap_handle;
-    const void* mmap_ptr = NULL;
+    const void *mmap_ptr = NULL;
     esp_err_t err = esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_INST, &mmap_ptr, &mmap_handle);
     if (err != ESP_OK) {
         printf("Failed to mmap partition: 0x%x\n", err);
@@ -26,7 +26,7 @@ void test_elf_parser(void)
     elf_parser_handle_t parser;
     elf_parser_config_t config = {
         .read = elf_read_cb,
-        .user_ctx = (void*)mmap_ptr,
+        .user_ctx = (void *)mmap_ptr,
     };
     elf_parser_open(&config, &parser);
 
@@ -44,11 +44,11 @@ void test_elf_parser(void)
     while (elf_segment_next(parser, &it, &segment)) {
         const char *type = "UNKNOWN";
         switch (elf_segment_get_type(segment)) {
-            case PT_LOAD: type = "LOAD"; break;
-            case PT_DYNAMIC: type = "DYNAMIC"; break;
-            case PT_INTERP: type = "INTERP"; break;
-            case PT_NOTE: type = "NOTE"; break;
-            case PT_SHLIB: type = "SHLIB"; break;
+        case PT_LOAD: type = "LOAD"; break;
+        case PT_DYNAMIC: type = "DYNAMIC"; break;
+        case PT_INTERP: type = "INTERP"; break;
+        case PT_NOTE: type = "NOTE"; break;
+        case PT_SHLIB: type = "SHLIB"; break;
         }
         printf("Segment: %s\n", type);
     }
@@ -77,7 +77,7 @@ void test_elf_parser(void)
 
 static size_t elf_read_cb(void *user_ctx, size_t offset, size_t n_bytes, void *dest)
 {
-    const void* mmap_ptr = (const void*)user_ctx;
+    const void *mmap_ptr = (const void *)user_ctx;
     memcpy(dest, mmap_ptr + offset, n_bytes);
     return n_bytes;
 }

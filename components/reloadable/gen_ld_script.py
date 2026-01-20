@@ -15,7 +15,7 @@ def main():
         main_elf = f.read()
     with open(args.reloadable_elf, 'rb') as f:
         reloadable_elf = f.read()
-    
+
 
     nm_undef_args = [args.nm, '--undefined-only', '--format=posix', args.reloadable_elf]
     nm_undef_output = subprocess.check_output(nm_undef_args, encoding='utf-8')
@@ -45,15 +45,15 @@ def main():
         if symbol_name in undef_symbols:
             def_symbols.append((symbol_name, symbol_address))
             undef_symbols.remove(symbol_name)
-        
+
 
     with open(args.output_ld_script, 'a') as f:
         for symbol in def_symbols:
             f.write(f'{symbol[0]} = 0x{symbol[1]};\n')
-    
+
     if len(undef_symbols) > 0:
         print(f'WARNING: {len(undef_symbols)} symbols are not found in the main ELF file: {undef_symbols}')
 
-    
+
 if __name__ == '__main__':
     main()

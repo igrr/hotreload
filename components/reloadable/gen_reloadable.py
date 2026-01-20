@@ -23,7 +23,7 @@ def main():
         generate_function_wrapper = generate_function_wrapper_riscv
     else:
         raise ValueError(f'Invalid architecture: {args.arch}')
-    
+
 
     nm_def_args = [args.nm, '--defined-only', '--format=posix', '--extern-only', args.input_elf]
     nm_undef_args = [args.nm, '--undefined-only', '--format=posix', args.input_elf]
@@ -46,7 +46,7 @@ def main():
 
         symbol_name = parts[0]
         symbol_type = parts[1]
-        
+
         if symbol_type == 'T':
             symbol_list.append(symbol_name)
             symbol_index = len(symbol_list) - 1
@@ -66,15 +66,15 @@ def main():
             f.write(f'    {table_name}[{symbol_index}] = hotreload_get_symbol_address("{symbol_name}");\n')
             symbol_index += 1
         f.write('}\n')
-    
+
 
     undef_symbols_lines = nm_undef_output.splitlines()
     with open(args.output_undefined_symbols_rsp_file, 'w') as f:
         for line in undef_symbols_lines:
             parts = line.split()
             symbol_name = parts[0]
-            f.write(f'-Wl,--undefined={symbol_name}\n')    
-    
+            f.write(f'-Wl,--undefined={symbol_name}\n')
+
 
 def generate_function_wrapper_xtensa(table_name, symbol_name, symbol_index, output_file):
     symbol_offset = symbol_index * 4
@@ -112,4 +112,3 @@ def generate_function_wrapper_riscv(table_name, symbol_name, symbol_index, outpu
 
 if __name__ == '__main__':
     main()
-
