@@ -76,7 +76,7 @@ endif()
 list(TRANSFORM sections_to_remove PREPEND "--remove-section=")
 
 
-add_custom_target(strip_reloadable_elf_final COMMAND
+add_custom_target(strip_reloadable_elf_final ALL COMMAND
     ${strip} -o ${CMAKE_CURRENT_BINARY_DIR}/reloadable_stripped.so $<TARGET_FILE:reloadable_elf_final>
     ${sections_to_remove}
     --strip-debug
