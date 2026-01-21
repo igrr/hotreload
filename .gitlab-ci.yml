@@ -3,10 +3,8 @@ stages:
 
 publish_component:
   stage: deploy
-  image: python:3.11-slim
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-  before_script:
-    - pip install idf-component-manager
   script:
-    - compote component upload --name hotreload --namespace igrr --version ${CI_COMMIT_TAG#v}
+    - python3 -m pip install --user idf-component-manager
+    - python3 -m compote component upload --name hotreload --namespace igrr --version ${CI_COMMIT_TAG#v}
