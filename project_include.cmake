@@ -111,6 +111,7 @@ function(hotreload_setup)
     add_dependencies(${elf_final_target} gen_${COMPONENT_NAME}_ld_script)
 
     # Strip the ELF
+    # Use add_custom_command with OUTPUT for proper dependency tracking
     set(strip ${_CMAKE_TOOLCHAIN_PREFIX}strip)
     set(sections_to_remove ".comment" ".got.loc" ".dynamic")
     if(CONFIG_IDF_TARGET_ARCH STREQUAL "xtensa")
@@ -121,12 +122,20 @@ function(hotreload_setup)
     endif()
     list(TRANSFORM sections_to_remove PREPEND "--remove-section=")
 
-    add_custom_target(strip_${COMPONENT_NAME}_elf ALL COMMAND
-        ${strip} -o ${stripped_elf_path} $<TARGET_FILE:${elf_final_target}>
-        ${sections_to_remove}
-        --strip-debug
-        BYPRODUCTS ${stripped_elf_path}
+    # add_custom_command with OUTPUT creates proper file-level dependencies
+    # When the input (elf_final_target output) changes, this will re-run
+    add_custom_command(
+        OUTPUT ${stripped_elf_path}
+        COMMAND ${strip} -o ${stripped_elf_path} $<TARGET_FILE:${elf_final_target}>
+            ${sections_to_remove}
+            --strip-debug
         DEPENDS ${elf_final_target}
+        COMMENT "Stripping ${COMPONENT_NAME} reloadable ELF"
+    )
+
+    # Create a target that depends on the stripped output
+    add_custom_target(strip_${COMPONENT_NAME}_elf ALL
+        DEPENDS ${stripped_elf_path}
     )
 
     # Set up flash targets
