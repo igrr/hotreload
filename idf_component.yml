@@ -5,14 +5,6 @@ description: >
   Enables rapid iteration during development by updating code over HTTP while
   the device keeps running.
 
-url: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload"
-
-repository: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload"
-
-documentation: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload/-/blob/main/README.md"
-
-issues: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload/-/issues"
-
 maintainers:
   - "Ivan Grokhotkov <ivan@espressif.com>"
 
