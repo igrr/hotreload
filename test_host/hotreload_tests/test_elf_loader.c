@@ -3,7 +3,10 @@
 #include "unity_test_runner.h"
 #include "elf_parser.h"
 #include "elf_loader.h"
+#include "hotreload.h"
 #include "esp_partition.h"
+#include "reloadable_util.h"
+#include "reloadable.h"
 
 /**
  * Test file for ELF loader functionality.
@@ -1075,4 +1078,92 @@ TEST_CASE("loaded reloadable_hello can be called", "[elf_loader][call]")
 
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
+}
+
+// ============================================================================
+// High-level API tests - hotreload_load()
+// ============================================================================
+
+TEST_CASE("hotreload_load succeeds with valid config", "[hotreload][api]")
+{
+    hotreload_config_t config = {
+        .partition_label = "hotreload",
+        .symbol_table = hotreload_symbol_table,
+        .symbol_names = hotreload_symbol_names,
+        .symbol_count = hotreload_symbol_count,
+    };
+
+    esp_err_t err = hotreload_load(&config);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Verify symbol table was populated
+    TEST_ASSERT_NOT_EQUAL(0, hotreload_symbol_table[0]);
+    TEST_ASSERT_NOT_EQUAL(0, hotreload_symbol_table[1]);
+
+    hotreload_unload();
+}
+
+TEST_CASE("hotreload_load populates symbol table correctly", "[hotreload][api]")
+{
+    // Clear the table first
+    for (size_t i = 0; i < hotreload_symbol_count; i++) {
+        hotreload_symbol_table[i] = 0;
+    }
+
+    esp_err_t err = HOTRELOAD_LOAD_DEFAULT();
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // All symbols should be populated
+    for (size_t i = 0; i < hotreload_symbol_count; i++) {
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(0, hotreload_symbol_table[i],
+            "Symbol table entry should be non-zero after load");
+    }
+
+    hotreload_unload();
+}
+
+TEST_CASE("hotreload_load rejects NULL config", "[hotreload][api]")
+{
+    esp_err_t err = hotreload_load(NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, err);
+}
+
+TEST_CASE("hotreload_load rejects missing partition", "[hotreload][api]")
+{
+    hotreload_config_t config = {
+        .partition_label = "nonexistent_partition",
+        .symbol_table = hotreload_symbol_table,
+        .symbol_names = hotreload_symbol_names,
+        .symbol_count = hotreload_symbol_count,
+    };
+
+    esp_err_t err = hotreload_load(&config);
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, err);
+}
+
+TEST_CASE("hotreload_unload returns error when not loaded", "[hotreload][api]")
+{
+    // Make sure nothing is loaded
+    hotreload_unload();
+
+    esp_err_t err = hotreload_unload();
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, err);
+}
+
+// ============================================================================
+// Stub function tests - call through generated stubs
+// ============================================================================
+
+TEST_CASE("reloadable functions can be called through stubs", "[hotreload][stubs]")
+{
+    // Load the ELF using high-level API
+    esp_err_t err = HOTRELOAD_LOAD_DEFAULT();
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Call through the stubs (generated ASM trampolines)
+    // These read from hotreload_symbol_table and jump to the loaded code
+    reloadable_init();
+    reloadable_hello("Stub Test");
+
+    hotreload_unload();
 }

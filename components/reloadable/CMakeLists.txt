@@ -1,4 +1,4 @@
-idf_component_register(INCLUDE_DIRS "include" PRIV_INCLUDE_DIRS "." PRIV_REQUIRES esp_system SRCS dummy.c reloadable_util.c)
+idf_component_register(INCLUDE_DIRS "include" PRIV_REQUIRES esp_system SRCS dummy.c reloadable_util.c)
 
 
 SET_PROPERTY(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS true)

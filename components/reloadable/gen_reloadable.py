@@ -56,16 +56,23 @@ def main():
 
 
     with open(args.output_symbol_table, 'w') as f:
-        f.write(f'''
-        #include "reloadable_util.h"
-        uint32_t {table_name}[{len(symbol_list)}];
-        void hotreload_symbol_table_init(void) {{
+        f.write(f'''#include <stdint.h>
+#include <stddef.h>
+
+// Symbol table - populated by hotreload_load()
+uint32_t {table_name}[{len(symbol_list)}];
+
+// Symbol names list for the loader to populate the table
+const char *const hotreload_symbol_names[] = {{
 ''')
-        symbol_index = 0
         for symbol_name in symbol_list:
-            f.write(f'    {table_name}[{symbol_index}] = hotreload_get_symbol_address("{symbol_name}");\n')
-            symbol_index += 1
-        f.write('}\n')
+            f.write(f'    "{symbol_name}",\n')
+        f.write(f'''    NULL  // Sentinel
+}};
+
+// Number of symbols in the table
+const size_t hotreload_symbol_count = {len(symbol_list)};
+''')
 
 
     undef_symbols_lines = nm_undef_output.splitlines()
@@ -80,15 +87,33 @@ def generate_function_wrapper_xtensa(table_name, symbol_name, symbol_index, outp
     symbol_offset = symbol_index * 4
     output_file.write(f'''
 .section .text
+.balign 4
 .global {symbol_name}
 .type {symbol_name}, @function
 {symbol_name}:
-    # stack pointer in a0, return address in a1, args in a2-a7
-    # use a8 and a9 as scratch registers to load the actual address from the symbol table,
-    # then jump to the function
+    # Trampoline to the actual function in the symbol table.
+    # We need to:
+    # 1. Set up our own frame with entry
+    # 2. Copy incoming arguments (a2-a7) to outgoing positions (a10-a15)
+    # 3. Load target address and call with callx8
+    # 4. Copy return values back (a10-a11 -> a2-a3)
+    # 5. Return to caller
+    entry a1, 48
+    # Copy up to 6 arguments from incoming to outgoing registers
+    mov a10, a2
+    mov a11, a3
+    mov a12, a4
+    mov a13, a5
+    mov a14, a6
+    mov a15, a7
+    # Load target address from symbol table
     movi a8, {table_name}
-    addi a8, a8, {symbol_offset}
-    jx a8
+    l32i a8, a8, {symbol_offset}
+    # Call the target function
+    callx8 a8
+    # Copy return values (if any) - a10/a11 become our a2/a3 after retw
+    # Actually, retw handles this automatically via window underflow
+    retw.n
 .size {symbol_name}, .-{symbol_name}
 
 ''')
@@ -100,11 +125,16 @@ def generate_function_wrapper_riscv(table_name, symbol_name, symbol_index, outpu
 .global {symbol_name}
 .type {symbol_name}, @function
 {symbol_name}:
-    # use t0 as scratch register to load the actual address from the symbol table,
-    # then jump to the function
+    # Trampoline to the actual function in the symbol table.
+    # Save ra, load target address, call it, then restore ra and return.
+    addi sp, sp, -16
+    sw ra, 12(sp)
     la t0, {table_name}
-    addi t0, t0, {symbol_offset}
-    jr t0
+    lw t0, {symbol_offset}(t0)
+    jalr ra, t0, 0
+    lw ra, 12(sp)
+    addi sp, sp, 16
+    ret
 .size {symbol_name}, .-{symbol_name}
 
 ''')
