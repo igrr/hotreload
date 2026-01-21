@@ -3,24 +3,21 @@
 This example demonstrates the ESP32 hot reload component with:
 - A simple reloadable component with runtime-updatable functions
 - HTTP server for over-the-air code updates
-- Unity-based tests for the ELF loader
 
 ## Project Structure
 
 ```
 basic/
 ├── main/
-│   └── hotreload.c           # Application entry point and integration test
+│   └── hotreload.c           # Application entry point
 ├── components/
 │   └── reloadable/           # Reloadable component
 │       ├── reloadable.c      # Functions that can be updated at runtime
-│       ├── reloadable.h      # Public API
+│       ├── include/
+│       │   └── reloadable.h  # Public API
 │       └── CMakeLists.txt    # Uses hotreload_setup()
-├── test_host/
-│   └── elf_loader/           # ELF loader unit tests
 ├── partitions.csv            # Partition table with hotreload partition
-├── sdkconfig.defaults        # Default configuration
-└── test_hotreload.py         # Pytest tests for QEMU
+└── sdkconfig.defaults        # Default configuration
 ```
 
 ## Building and Running
@@ -28,7 +25,7 @@ basic/
 ### Prerequisites
 
 - ESP-IDF v5.0 or later
-- Python 3.8+
+- ESP32 development board
 
 ### Build and Flash
 
@@ -38,31 +35,52 @@ idf.py set-target esp32
 idf.py build flash monitor
 ```
 
-### Using the Unity Menu
+### Expected Output
 
-The application starts with a Unity test menu. You can:
+```
+========================================
+   ESP32 Hot Reload Example
+========================================
 
-1. Press Enter to see available tests
-2. Type `*` to run all tests
-3. Type `-integration` to run all tests except integration
-4. Type `hotreload_integration` to run the HTTP server integration test
-
-### Running Tests with QEMU
-
-```bash
-# Build and run in QEMU
-idf.py build
-idf.py run-project --qemu
+I (xxx) hotreload_example: Connecting to network...
+I (xxx) hotreload_example: Connected!
+I (xxx) hotreload_example: Loading reloadable module...
+I (xxx) hotreload_example: Module loaded successfully!
+Hello, World, from v5.x.x! 0
+I (xxx) hotreload_example: Hot reload server running on port 8080
+I (xxx) hotreload_example: To update code: idf.py reload --url http://<device-ip>:8080
 ```
 
-Or with pytest:
+## Updating Code at Runtime
+
+### Method 1: Using idf.py reload (Recommended)
+
+The easiest way to update code is with the `idf.py reload` command:
 
 ```bash
-# Run unit tests only
-pytest test_hotreload.py::test_hotreload_unit_tests -v
+# Modify reloadable.c, then:
+idf.py reload --url http://<device-ip>:8080
+```
 
-# Run integration test (requires network)
-pytest test_hotreload.py::test_hot_reload_e2e -v
+This will automatically rebuild and upload the new code.
+
+### Method 2: Flash Directly
+
+Flash just the reloadable partition (requires physical connection):
+
+```bash
+idf.py build hotreload-flash
+```
+
+### Method 3: HTTP Upload with curl
+
+```bash
+# Build first
+idf.py build
+
+# Upload and reload
+curl -X POST --data-binary @build/esp-idf/reloadable/reloadable_stripped.so \
+    http://<device-ip>:8080/upload-and-reload
 ```
 
 ## How It Works
@@ -73,15 +91,19 @@ The `components/reloadable/` directory contains code that can be updated at runt
 
 ```c
 // reloadable.c
+static const char *reloadable_greeting = "Hello";
+
 void reloadable_hello(const char *name)
 {
-    printf("Hello, %s!\n", name);
+    printf("%s, %s!\n", reloadable_greeting, name);
 }
 ```
 
+Try changing `"Hello"` to `"Goodbye"` and running `idf.py reload` to see the change take effect!
+
 The `CMakeLists.txt` uses `hotreload_setup()` to:
-1. Build this code as a shared library
-2. Generate stubs and symbol table
+1. Build this code as a position-independent shared library
+2. Generate stubs and symbol table for the main app
 3. Create a flashable ELF for the hotreload partition
 
 ### Main Application
@@ -95,6 +117,8 @@ The main app loads and calls the reloadable code:
 
 void app_main(void)
 {
+    // Initialize WiFi...
+
     // Load reloadable ELF from flash
     HOTRELOAD_LOAD_DEFAULT();
 
@@ -114,62 +138,21 @@ The `partitions.csv` defines a 512KB partition for reloadable code:
 hotreload,  app,  0x40,  ,  512k,
 ```
 
-## Updating Code at Runtime
-
-### Method 1: Flash Directly
-
-Modify `reloadable.c`, rebuild, and flash just the reloadable partition:
-
-```bash
-idf.py build hotreload-flash
-```
-
-### Method 2: HTTP Upload
-
-With the HTTP server running:
-
-```bash
-curl -X POST -F "file=@build/reloadable_stripped.so" \
-    http://<device-ip>:8080/upload-and-reload
-```
-
 ## Configuration
 
 Key settings in `sdkconfig.defaults`:
 
 ```ini
-# Partition table with hotreload partition
+# Custom partition table with hotreload partition
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
-# Network for QEMU testing
+# Network configuration (adjust for your setup)
 CONFIG_EXAMPLE_CONNECT_ETHERNET=y
 CONFIG_EXAMPLE_USE_OPENETH=y
-
-# Disable task watchdog for Unity menu
-CONFIG_ESP_TASK_WDT_INIT=n
 ```
 
-## Tests
-
-### Unit Tests
-
-Located in `test_host/elf_loader/`, these test the ELF loader internals:
-- ELF header validation
-- Memory layout calculation
-- Section loading
-- Relocation processing
-- Symbol lookup
-
-### Integration Test
-
-The `hotreload_integration` test case:
-1. Initializes networking (openeth in QEMU)
-2. Loads the initial reloadable ELF
-3. Starts the HTTP server
-4. Waits for external test to upload new code
-
-The pytest `test_hot_reload_e2e` orchestrates the full flow.
+For WiFi, use `idf.py menuconfig` to set your SSID and password under "Example Connection Configuration".
 
 ## Troubleshooting
 
@@ -183,10 +166,10 @@ If you see "No 'hotreload' partition found":
 
 If `HOTRELOAD_LOAD_DEFAULT()` fails:
 - Check that the hotreload partition was flashed
-- Verify the ELF is valid with `readelf -h build/reloadable_stripped.so`
+- Verify the ELF is valid with `readelf -h build/esp-idf/reloadable/reloadable_stripped.so`
 
 ### HTTP Server Not Responding
 
 - Ensure networking is properly initialized
 - Check firewall settings
-- Verify the IP address with `idf.py monitor`
+- Verify the device IP address in the serial monitor output
