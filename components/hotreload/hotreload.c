@@ -16,6 +16,91 @@ static const char *TAG = "hotreload";
 static elf_loader_ctx_t s_loader_ctx;
 static esp_partition_mmap_handle_t s_mmap_handle;
 static bool s_is_loaded = false;
+static bool s_loaded_from_buffer = false;  // True if loaded from RAM buffer (no mmap)
+
+// Hook state
+static hotreload_hook_fn_t s_pre_hook = NULL;
+static void *s_pre_hook_ctx = NULL;
+static hotreload_hook_fn_t s_post_hook = NULL;
+static void *s_post_hook_ctx = NULL;
+
+// Forward declarations
+esp_err_t hotreload_unload(void);
+
+// Helper function to perform ELF loading steps (shared by load and load_from_buffer)
+static esp_err_t do_elf_load(const void *elf_data, size_t elf_size,
+                              uint32_t *symbol_table,
+                              const char *const *symbol_names,
+                              size_t symbol_count)
+{
+    esp_err_t err;
+
+    // Initialize the ELF loader
+    err = elf_loader_init(&s_loader_ctx, elf_data, elf_size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to init ELF loader: %d", err);
+        return err;
+    }
+
+    // Calculate memory layout
+    err = elf_loader_calculate_memory_layout(&s_loader_ctx, NULL, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to calculate memory layout: %d", err);
+        elf_loader_cleanup(&s_loader_ctx);
+        return err;
+    }
+
+    // Allocate RAM
+    err = elf_loader_allocate(&s_loader_ctx);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to allocate memory: %d", err);
+        elf_loader_cleanup(&s_loader_ctx);
+        return err;
+    }
+
+    // Load sections
+    err = elf_loader_load_sections(&s_loader_ctx);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load sections: %d", err);
+        elf_loader_cleanup(&s_loader_ctx);
+        return err;
+    }
+
+    // Apply relocations
+    err = elf_loader_apply_relocations(&s_loader_ctx);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to apply relocations: %d", err);
+        elf_loader_cleanup(&s_loader_ctx);
+        return err;
+    }
+
+    // Sync cache
+    err = elf_loader_sync_cache(&s_loader_ctx);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to sync cache: %d", err);
+        elf_loader_cleanup(&s_loader_ctx);
+        return err;
+    }
+
+    // Populate the symbol table
+    for (size_t i = 0; i < symbol_count; i++) {
+        const char *name = symbol_names[i];
+        if (name == NULL) {
+            break;  // Sentinel reached
+        }
+
+        void *addr = elf_loader_get_symbol(&s_loader_ctx, name);
+        if (addr == NULL) {
+            ESP_LOGW(TAG, "Symbol '%s' not found in ELF", name);
+            symbol_table[i] = 0;
+        } else {
+            symbol_table[i] = (uint32_t)(uintptr_t)addr;
+            ESP_LOGD(TAG, "Symbol[%d] '%s' = %p", (int)i, name, addr);
+        }
+    }
+
+    return ESP_OK;
+}
 
 esp_err_t hotreload_load(const hotreload_config_t *config)
 {
@@ -51,77 +136,17 @@ esp_err_t hotreload_load(const hotreload_config_t *config)
         return err;
     }
 
-    // Initialize the ELF loader
-    err = elf_loader_init(&s_loader_ctx, mmap_ptr, partition->size);
+    // Perform ELF loading using shared helper
+    err = do_elf_load(mmap_ptr, partition->size,
+                      config->symbol_table, config->symbol_names, config->symbol_count);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to init ELF loader: %d", err);
         esp_partition_munmap(s_mmap_handle);
+        s_mmap_handle = 0;
         return err;
-    }
-
-    // Calculate memory layout
-    err = elf_loader_calculate_memory_layout(&s_loader_ctx, NULL, NULL);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to calculate memory layout: %d", err);
-        elf_loader_cleanup(&s_loader_ctx);
-        esp_partition_munmap(s_mmap_handle);
-        return err;
-    }
-
-    // Allocate RAM
-    err = elf_loader_allocate(&s_loader_ctx);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to allocate memory: %d", err);
-        elf_loader_cleanup(&s_loader_ctx);
-        esp_partition_munmap(s_mmap_handle);
-        return err;
-    }
-
-    // Load sections
-    err = elf_loader_load_sections(&s_loader_ctx);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to load sections: %d", err);
-        elf_loader_cleanup(&s_loader_ctx);
-        esp_partition_munmap(s_mmap_handle);
-        return err;
-    }
-
-    // Apply relocations
-    err = elf_loader_apply_relocations(&s_loader_ctx);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to apply relocations: %d", err);
-        elf_loader_cleanup(&s_loader_ctx);
-        esp_partition_munmap(s_mmap_handle);
-        return err;
-    }
-
-    // Sync cache
-    err = elf_loader_sync_cache(&s_loader_ctx);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to sync cache: %d", err);
-        elf_loader_cleanup(&s_loader_ctx);
-        esp_partition_munmap(s_mmap_handle);
-        return err;
-    }
-
-    // Populate the symbol table
-    for (size_t i = 0; i < config->symbol_count; i++) {
-        const char *name = config->symbol_names[i];
-        if (name == NULL) {
-            break;  // Sentinel reached
-        }
-
-        void *addr = elf_loader_get_symbol(&s_loader_ctx, name);
-        if (addr == NULL) {
-            ESP_LOGW(TAG, "Symbol '%s' not found in ELF", name);
-            config->symbol_table[i] = 0;
-        } else {
-            config->symbol_table[i] = (uint32_t)(uintptr_t)addr;
-            ESP_LOGD(TAG, "Symbol[%d] '%s' = %p", i, name, addr);
-        }
     }
 
     s_is_loaded = true;
+    s_loaded_from_buffer = false;
     ESP_LOGI(TAG, "Loaded reloadable ELF from partition '%s'", config->partition_label);
 
     return ESP_OK;
@@ -134,13 +159,132 @@ esp_err_t hotreload_unload(void)
     }
 
     elf_loader_cleanup(&s_loader_ctx);
-    esp_partition_munmap(s_mmap_handle);
+
+    // Only munmap if we loaded from partition
+    if (!s_loaded_from_buffer && s_mmap_handle != 0) {
+        esp_partition_munmap(s_mmap_handle);
+    }
 
     memset(&s_loader_ctx, 0, sizeof(s_loader_ctx));
     s_mmap_handle = 0;
     s_is_loaded = false;
+    s_loaded_from_buffer = false;
 
     ESP_LOGI(TAG, "Unloaded reloadable ELF");
 
+    return ESP_OK;
+}
+
+esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size,
+                                     uint32_t *symbol_table,
+                                     const char *const *symbol_names,
+                                     size_t symbol_count)
+{
+    if (elf_data == NULL || symbol_table == NULL || symbol_names == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Unload previous ELF if loaded
+    if (s_is_loaded) {
+        hotreload_unload();
+    }
+
+    esp_err_t err = do_elf_load(elf_data, elf_size, symbol_table, symbol_names, symbol_count);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_is_loaded = true;
+    s_loaded_from_buffer = true;
+    ESP_LOGI(TAG, "Loaded reloadable ELF from buffer (%d bytes)", (int)elf_size);
+
+    return ESP_OK;
+}
+
+esp_err_t hotreload_update_partition(const char *partition_label,
+                                     const void *elf_data, size_t elf_size)
+{
+    if (partition_label == NULL || elf_data == NULL || elf_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Find the partition
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, partition_label);
+    if (partition == NULL) {
+        ESP_LOGE(TAG, "Partition '%s' not found", partition_label);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Check size
+    if (elf_size > partition->size) {
+        ESP_LOGE(TAG, "ELF size (%d) exceeds partition size (%lu)",
+                 (int)elf_size, (unsigned long)partition->size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // Erase partition
+    esp_err_t err = esp_partition_erase_range(partition, 0, partition->size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to erase partition: %d", err);
+        return err;
+    }
+
+    // Write ELF data
+    err = esp_partition_write(partition, 0, elf_data, elf_size);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write to partition: %d", err);
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Updated partition '%s' with %d bytes", partition_label, (int)elf_size);
+    return ESP_OK;
+}
+
+esp_err_t hotreload_register_pre_hook(hotreload_hook_fn_t hook, void *user_ctx)
+{
+    s_pre_hook = hook;
+    s_pre_hook_ctx = user_ctx;
+    return ESP_OK;
+}
+
+esp_err_t hotreload_register_post_hook(hotreload_hook_fn_t hook, void *user_ctx)
+{
+    s_post_hook = hook;
+    s_post_hook_ctx = user_ctx;
+    return ESP_OK;
+}
+
+esp_err_t hotreload_reload(const hotreload_config_t *config)
+{
+    if (config == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Call pre-reload hook
+    if (s_pre_hook != NULL) {
+        ESP_LOGD(TAG, "Calling pre-reload hook");
+        s_pre_hook(s_pre_hook_ctx);
+    }
+
+    // Unload current ELF (if any)
+    if (s_is_loaded) {
+        hotreload_unload();
+    }
+
+    // Load new ELF
+    esp_err_t err = hotreload_load(config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Reload failed: %d", err);
+        return err;
+    }
+
+    // Call post-reload hook
+    if (s_post_hook != NULL) {
+        ESP_LOGD(TAG, "Calling post-reload hook");
+        s_post_hook(s_post_hook_ctx);
+    }
+
+    ESP_LOGI(TAG, "Reload complete");
     return ESP_OK;
 }

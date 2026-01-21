@@ -63,9 +63,24 @@
 
 at this point we should be able to reflash the "reloadable" part and restart the app; it's just "faster reflash" at this point, not "run-time hot reload" yet
 
-- [ ] Add a server which can receive the updated "reloadable" part. Can consider UART transport (hack it into IDF monitor?), or TCP or HTTP. We don't really need TLS because this happens in developer's local network.
-- [ ] Add a function which the app can call periodically, which will initiate the reload
-- [ ] Allow the app to register hook functions which will be called before reload and after reload (e.g. to free run-time allocated resources, persist the state, or do any other handover while reload is happening)
+## Phase 2: Runtime Hot Reload
+
+### 2.1 Extended API ✅
+- [x] Added hotreload_load_from_buffer() for loading ELF from RAM
+- [x] Added hotreload_update_partition() for writing ELF to flash
+- [x] Added hotreload_reload() convenience function with hooks
+- [x] Added hook registration: hotreload_register_pre_hook(), hotreload_register_post_hook()
+
+### 2.2 HTTP Server ✅
+- [x] Added hotreload_server_start() / hotreload_server_stop()
+- [x] HTTP endpoints:
+  - POST /upload - Upload ELF to flash partition
+  - POST /reload - Trigger reload from flash
+  - POST /upload-and-reload - Upload and reload in one request
+  - GET /status - Server status check
+- [x] Added HOTRELOAD_SERVER_START_DEFAULT() convenience macro
+
+### 2.3 idf.py Integration (pending)
 - [ ] Add an idf.py command to:
   - automatically try to rebuild the reloadable part
   - check that the main app doesn't need to be rebuilt
