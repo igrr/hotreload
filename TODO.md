@@ -1,6 +1,6 @@
 ## Phase 1: ELF Loading Infrastructure (see ELF_LOADER_DESIGN.md and CLAUDE.md)
 
-**STATUS: COMPLETE** - 42 tests passing, full ELF loading and execution working.
+**STATUS: COMPLETE** - 48 tests passing, full ELF loading, execution, and high-level API working.
 
 ### 1.1 Prerequisites and Setup ✅
 - [x] Set up test infrastructure with agent_dev_utils component
@@ -45,18 +45,21 @@
 - [x] reloadable_init() can be called
 - [x] reloadable_hello() can be called (verifies external symbol resolution)
 
-### 1.10 Refactoring and API Design
+### 1.10 Refactoring and API Design ✅
 
-- [ ] Refactor symbol table initialization
-  - Refactor from "pull" model (hotreload_get_symbol_address) to "push" model
-  - Cleaner API where loader populates table during ELF parsing
+- [x] Refactor symbol table initialization
+  - Refactored from "pull" model (hotreload_get_symbol_address) to "push" model
+  - Loader now populates table during ELF loading via symbol names array
 
-- [ ] Public API design (defer until loading works)
-- [ ] Add public API for initializing the hot reload feature (including loading the reloadable part). Add a public header file for the hot reload feature.
-- [ ] Clean up the code of `reloadable` component, splitting it into:
-      - The actual sample component which will be reloaded
-      - The `hotreload` helper component, where all the infrastructure exists
-        - Some parts of hotreload/CMakeLists.txt should be moved to project_include.cmake, so that the actual reloadable component can call them (e.g. `hotreload_idf_component_register` wrapper)
+- [x] Public API design
+  - Added hotreload.h with hotreload_load() and hotreload_unload()
+  - Added HOTRELOAD_LOAD_DEFAULT() convenience macro
+
+- [x] Component split completed:
+      - `reloadable` component: Sample code only (reloadable.c, reloadable.h, dummy.c)
+      - `hotreload` component: Infrastructure (elf_loader, hotreload API, scripts, CMake functions)
+      - Created project_include.cmake with hotreload_setup() function
+      - Moved gen_reloadable.py and gen_ld_script.py to hotreload/scripts/
 
 at this point we should be able to reflash the "reloadable" part and restart the app; it's just "faster reflash" at this point, not "run-time hot reload" yet
 
