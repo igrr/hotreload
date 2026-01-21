@@ -52,6 +52,7 @@ files:
     - "elf_parser/**/*.c"
     - "elf_parser/**/*.h"
     - "scripts/**/*.py"
+    - "idf_ext.py"
     - "project_include.cmake"
     - "CMakeLists.txt"
     - "examples/**"
