@@ -435,7 +435,48 @@ esp_err_t elf_loader_sync_cache(elf_loader_ctx_t *ctx)
 
 void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
 {
-    // TODO: Implement
+    if (ctx == NULL || name == NULL) {
+        return NULL;
+    }
+
+    if (ctx->parser == NULL || ctx->ram_base == NULL) {
+        return NULL;
+    }
+
+    elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
+
+    // Calculate load base for address adjustment
+    uintptr_t load_base = (uintptr_t)ctx->ram_base - ctx->vma_base;
+
+    // Iterate through symbols to find the one with matching name
+    elf_iterator_handle_t it;
+    elf_parser_get_symbols_it(parser, &it);
+
+    elf_symbol_handle_t sym;
+    char sym_name[64];
+
+    while (elf_symbol_next(parser, &it, &sym)) {
+        esp_err_t err = elf_symbol_get_name(sym, sym_name, sizeof(sym_name));
+        if (err != ESP_OK) {
+            continue;
+        }
+
+        if (strcmp(sym_name, name) == 0) {
+            // Found the symbol - return relocated address
+            uintptr_t sym_value = elf_symbol_get_value(sym);
+
+            // Skip symbols with value 0 (undefined or special)
+            if (sym_value == 0) {
+                continue;
+            }
+
+            void *addr = (void *)(load_base + sym_value);
+            ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, addr, sym_value);
+            return addr;
+        }
+    }
+
+    ESP_LOGD(TAG, "Symbol '%s' not found", name);
     return NULL;
 }
 

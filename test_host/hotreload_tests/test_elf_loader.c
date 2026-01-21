@@ -844,3 +844,130 @@ TEST_CASE("full ELF load workflow completes successfully", "[elf_loader][integra
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
 }
+
+// ============================================================================
+// Symbol Lookup tests
+// ============================================================================
+
+TEST_CASE("elf_loader_get_symbol finds reloadable_init", "[elf_loader][symbol]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_apply_relocations(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Look up reloadable_init symbol
+    void *sym = elf_loader_get_symbol(&ctx, "reloadable_init");
+    TEST_ASSERT_NOT_NULL_MESSAGE(sym, "reloadable_init symbol not found");
+
+    // Symbol should point within the loaded RAM
+    TEST_ASSERT_GREATER_OR_EQUAL((uintptr_t)ctx.ram_base, (uintptr_t)sym);
+    TEST_ASSERT_LESS_THAN((uintptr_t)ctx.ram_base + ctx.ram_size, (uintptr_t)sym);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_get_symbol finds reloadable_hello", "[elf_loader][symbol]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_apply_relocations(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Look up reloadable_hello symbol
+    void *sym = elf_loader_get_symbol(&ctx, "reloadable_hello");
+    TEST_ASSERT_NOT_NULL_MESSAGE(sym, "reloadable_hello symbol not found");
+
+    // Symbol should point within the loaded RAM
+    TEST_ASSERT_GREATER_OR_EQUAL((uintptr_t)ctx.ram_base, (uintptr_t)sym);
+    TEST_ASSERT_LESS_THAN((uintptr_t)ctx.ram_base + ctx.ram_size, (uintptr_t)sym);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_get_symbol returns NULL for unknown symbol", "[elf_loader][symbol]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Look up non-existent symbol
+    void *sym = elf_loader_get_symbol(&ctx, "nonexistent_symbol_xyz");
+    TEST_ASSERT_NULL_MESSAGE(sym, "Should return NULL for unknown symbol");
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_get_symbol returns NULL for NULL context", "[elf_loader][symbol]")
+{
+    void *sym = elf_loader_get_symbol(NULL, "reloadable_init");
+    TEST_ASSERT_NULL(sym);
+}
+
+TEST_CASE("elf_loader_get_symbol returns NULL for NULL name", "[elf_loader][symbol]")
+{
+    elf_loader_ctx_t ctx = {0};
+    void *sym = elf_loader_get_symbol(&ctx, NULL);
+    TEST_ASSERT_NULL(sym);
+}
