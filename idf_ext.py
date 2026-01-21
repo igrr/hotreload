@@ -59,21 +59,14 @@ def _upload_and_reload(url: str, elf_path: Path, verbose: bool = False) -> bool:
     with open(elf_path, "rb") as f:
         elf_data = f.read()
 
-    # Create multipart form data
-    boundary = "----HotReloadBoundary"
-    body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="{elf_path.name}"\r\n'
-        f"Content-Type: application/octet-stream\r\n\r\n"
-    ).encode() + elf_data + f"\r\n--{boundary}--\r\n".encode()
-
+    # Send raw binary data (server expects application/octet-stream)
     headers = {
-        "Content-Type": f"multipart/form-data; boundary={boundary}",
-        "Content-Length": str(len(body)),
+        "Content-Type": "application/octet-stream",
+        "Content-Length": str(len(elf_data)),
     }
 
     try:
-        req = Request(endpoint, data=body, headers=headers, method="POST")
+        req = Request(endpoint, data=elf_data, headers=headers, method="POST")
         with urlopen(req, timeout=30) as response:
             result = response.read().decode()
             if verbose:
