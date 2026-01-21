@@ -9,6 +9,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_cache.h"
 #include "elf_loader.h"
 #include "elf_parser.h"
 
@@ -403,8 +404,33 @@ esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
 
 esp_err_t elf_loader_sync_cache(elf_loader_ctx_t *ctx)
 {
-    // TODO: Implement
-    return ESP_ERR_NOT_SUPPORTED;
+    if (ctx == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (ctx->ram_base == NULL || ctx->ram_size == 0) {
+        ESP_LOGE(TAG, "No loaded data to sync");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Sync CPU cache to ensure instruction cache sees the loaded code
+    // This is critical for code execution on ESP32
+    esp_err_t err = esp_cache_msync(ctx->ram_base, ctx->ram_size,
+                                     ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        // Cache sync not supported (e.g., in QEMU or certain ESP32 variants)
+        // On real hardware with IRAM allocation, cache coherency is automatic
+        ESP_LOGW(TAG, "Cache sync not supported, assuming cache-coherent memory");
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Cache sync failed: %d", err);
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Cache synced for %zu bytes at %p", ctx->ram_size, ctx->ram_base);
+
+    return ESP_OK;
 }
 
 void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)

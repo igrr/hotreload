@@ -748,3 +748,99 @@ TEST_CASE("elf_loader_apply_relocations rejects context without loading", "[elf_
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
 }
+
+// ============================================================================
+// Cache Sync tests
+// ============================================================================
+
+TEST_CASE("elf_loader_sync_cache succeeds after relocations", "[elf_loader][cache]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_apply_relocations(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_sync_cache(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+TEST_CASE("elf_loader_sync_cache rejects NULL context", "[elf_loader][cache]")
+{
+    esp_err_t err = elf_loader_sync_cache(NULL);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, err);
+}
+
+// ============================================================================
+// Integration test - full ELF loading workflow
+// ============================================================================
+
+TEST_CASE("full ELF load workflow completes successfully", "[elf_loader][integration]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+
+    // Step 1: Initialize
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Step 2: Calculate memory layout
+    size_t ram_size;
+    uintptr_t vma_base;
+    err = elf_loader_calculate_memory_layout(&ctx, &ram_size, &vma_base);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_GREATER_THAN(0, ram_size);
+
+    // Step 3: Allocate memory
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+    TEST_ASSERT_NOT_NULL(ctx.ram_base);
+
+    // Step 4: Load sections
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Step 5: Apply relocations
+    err = elf_loader_apply_relocations(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Step 6: Sync cache
+    err = elf_loader_sync_cache(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Cleanup
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
