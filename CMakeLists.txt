@@ -1,10 +1,19 @@
-# The following five lines of boilerplate have to be in your project's
-# CMakeLists in this exact order for cmake to work correctly
-cmake_minimum_required(VERSION 3.16)
+# SPDX-FileCopyrightText: 2026 Espressif Systems
+# SPDX-License-Identifier: MIT
 
-# Add test_host directory to component search path
-set(EXTRA_COMPONENT_DIRS test_host)
+# ESP32 Hot Reload Component
+# Provides runtime ELF loading and hot reload functionality
 
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-set(COMPONENTS main espcoredump)
-project(hotreload)
+idf_component_register(
+    SRCS
+        "src/elf_loader.c"
+        "src/hotreload.c"
+        "src/hotreload_server.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_REQUIRES
+        elf_parser
+        esp_mm
+        esp_partition
+        esp_http_server
+)

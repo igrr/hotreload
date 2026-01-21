@@ -1,0 +1,60 @@
+version: "0.1.0"
+
+description: >
+  Runtime hot reload for ESP32 - load and reload ELF modules without reflashing.
+  Enables rapid iteration during development by updating code over HTTP while
+  the device keeps running.
+
+url: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload"
+
+repository: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload"
+
+documentation: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload/-/blob/main/README.md"
+
+issues: "https://gitlab.espressif.cn:6688/igrokhotkov/hotreload/-/issues"
+
+maintainers:
+  - "Ivan Grokhotkov <ivan@espressif.com>"
+
+license: "MIT"
+
+targets:
+  - esp32
+  # TODO: Add more targets as tested
+
+dependencies:
+  idf: ">=5.0"
+  elf_parser:
+    path: "./elf_parser"
+    version: "*"
+
+tags:
+  - hot-reload
+  - elf-loader
+  - development
+  - debugging
+  - live-update
+
+# Control what gets uploaded to registry
+files:
+  exclude:
+    - "**/__pycache__/**"
+    - "**/*.pyc"
+    - "**/.pytest_cache/**"
+    - "**/build/**"
+    - "**/.git/**"
+    - "examples/**/build/**"
+    - "examples/**/sdkconfig"
+    - "examples/**/sdkconfig.old"
+  include:
+    - "src/**/*.c"
+    - "include/**/*.h"
+    - "elf_parser/**/*.c"
+    - "elf_parser/**/*.h"
+    - "scripts/**/*.py"
+    - "project_include.cmake"
+    - "CMakeLists.txt"
+    - "examples/**"
+    - "README.md"
+    - "LICENSE"
+    - "CHANGELOG.md"
