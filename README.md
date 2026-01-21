@@ -177,6 +177,43 @@ curl -X POST -F "file=@build/reloadable_stripped.so" \
     http://192.168.1.100:8080/upload-and-reload
 ```
 
+### Using idf.py Commands
+
+The component provides two idf.py commands for convenient development:
+
+#### idf.py reload
+
+Build and send the reloadable ELF to the device in one step:
+
+```bash
+# Set device URL (or use --url option)
+export HOTRELOAD_URL=http://192.168.1.100:8080
+
+# Build and reload
+idf.py reload
+
+# Or with explicit URL
+idf.py reload --url http://192.168.1.100:8080
+```
+
+#### idf.py watch
+
+Watch source files and automatically reload on changes:
+
+```bash
+# Start watching (Ctrl+C to stop)
+idf.py watch --url http://192.168.1.100:8080
+
+# With custom debounce time
+idf.py watch --url http://192.168.1.100:8080 --debounce 1.0
+```
+
+The watch command:
+1. Monitors components using `hotreload_setup()` for file changes
+2. Waits for changes to settle (debouncing)
+3. Automatically rebuilds and uploads to the device
+4. Shows build errors inline
+
 ## API Reference
 
 ### Loading Functions
