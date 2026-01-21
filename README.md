@@ -24,13 +24,6 @@ dependencies:
   igrr/hotreload: "*"
 ```
 
-Or clone directly:
-
-```bash
-cd components
-git clone https://gitlab.espressif.cn:6688/igrokhotkov/hotreload.git
-```
-
 ## Quick Start
 
 ### 1. Add a Partition for Reloadable Code
@@ -322,8 +315,3 @@ pytest test_hotreload.py -v
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Issues and merge requests welcome at:
-https://gitlab.espressif.cn:6688/igrokhotkov/hotreload
