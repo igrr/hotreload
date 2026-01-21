@@ -291,10 +291,114 @@ esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
     return ESP_OK;
 }
 
+// Xtensa relocation types
+#define R_XTENSA_NONE       0
+#define R_XTENSA_32         1
+#define R_XTENSA_RTLD       2
+#define R_XTENSA_JMP_SLOT   4
+#define R_XTENSA_RELATIVE   5
+#define R_XTENSA_PLT        6
+#define R_XTENSA_SLOT0_OP   20
+
 esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
 {
-    // TODO: Implement
-    return ESP_ERR_NOT_SUPPORTED;
+    if (ctx == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (ctx->ram_base == NULL) {
+        ESP_LOGE(TAG, "RAM not allocated");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
+
+    // Calculate load base: where sections were actually loaded
+    // load_base = ram_base - vma_base (adjust for VMA offset)
+    uintptr_t load_base = (uintptr_t)ctx->ram_base - ctx->vma_base;
+
+    // Iterate through RELA relocations
+    elf_iterator_handle_t it;
+    elf_parser_get_relocations_a_it(parser, &it);
+
+    elf_relocation_a_handle_t rela;
+    int reloc_count = 0;
+    int applied_count = 0;
+
+    while (elf_reloc_a_next(parser, &it, &rela)) {
+        reloc_count++;
+
+        uintptr_t offset = elf_reloc_a_get_offset(rela);
+        uint32_t type = elf_reloc_a_get_type(rela);
+        int32_t addend = elf_reloc_a_get_addend(rela);
+
+        ESP_LOGD(TAG, "Reloc[%d]: offset=0x%x type=%d addend=%d",
+                 reloc_count, offset, type, addend);
+
+        // Check if offset is within our loaded section range
+        if (offset < ctx->vma_base || offset >= ctx->vma_base + ctx->ram_size) {
+            ESP_LOGD(TAG, "Skipping relocation outside loaded range: offset=0x%x", offset);
+            continue;
+        }
+
+        // Calculate location in RAM to patch
+        // offset is the VMA where the relocation applies
+        uintptr_t location_addr = load_base + offset;
+        uint32_t *location = (uint32_t *)location_addr;
+
+        switch (type) {
+            case R_XTENSA_RELATIVE:
+                // Formula: *location = load_base + addend
+                *location = (uint32_t)(load_base + addend);
+                applied_count++;
+                ESP_LOGV(TAG, "R_XTENSA_RELATIVE: offset=0x%x -> 0x%x",
+                         offset, *location);
+                break;
+
+            case R_XTENSA_32: {
+                // Formula: *location = symbol_value + addend
+                // symbol_value from elf_parser is the original VMA
+                uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
+                // Adjust for load base
+                *location = (uint32_t)(load_base + sym_val + addend);
+                applied_count++;
+                ESP_LOGV(TAG, "R_XTENSA_32: offset=0x%x sym_val=0x%x -> 0x%x",
+                         offset, sym_val, *location);
+                break;
+            }
+
+            case R_XTENSA_JMP_SLOT:
+            case R_XTENSA_PLT: {
+                // External symbols (printf, etc.) - address already resolved at link time
+                // sym_val contains the fixed address from the main app's symbol table
+                uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
+                *location = (uint32_t)sym_val;
+                applied_count++;
+                ESP_LOGV(TAG, "R_XTENSA_JMP_SLOT/PLT: offset=0x%x -> 0x%x",
+                         offset, *location);
+                break;
+            }
+
+            case R_XTENSA_SLOT0_OP:
+                // Xtensa instruction-specific relocation
+                // Complex encoding - skip for now with warning
+                ESP_LOGD(TAG, "Skipping R_XTENSA_SLOT0_OP at offset 0x%x", offset);
+                break;
+
+            case R_XTENSA_RTLD:
+            case R_XTENSA_NONE:
+                // Skip these
+                break;
+
+            default:
+                ESP_LOGW(TAG, "Unknown relocation type %d at offset 0x%x", type, offset);
+                break;
+        }
+    }
+
+    ESP_LOGI(TAG, "Processed %d relocations, applied %d", reloc_count, applied_count);
+
+    return ESP_OK;
 }
 
 esp_err_t elf_loader_sync_cache(elf_loader_ctx_t *ctx)
