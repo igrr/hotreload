@@ -7,12 +7,12 @@
 idf_component_register(
     SRCS
         "src/elf_loader.c"
+        "src/elf_parser.c"
         "src/hotreload.c"
         "src/hotreload_server.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES
-        elf_parser
         esp_mm
         esp_partition
         esp_http_server

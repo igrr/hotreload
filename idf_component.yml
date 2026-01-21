@@ -24,9 +24,6 @@ targets:
 
 dependencies:
   idf: ">=5.0"
-  elf_parser:
-    path: "./elf_parser"
-    version: "*"
 
 tags:
   - hot-reload
@@ -49,8 +46,6 @@ files:
   include:
     - "src/**/*.c"
     - "include/**/*.h"
-    - "elf_parser/**/*.c"
-    - "elf_parser/**/*.h"
     - "scripts/**/*.py"
     - "idf_ext.py"
     - "project_include.cmake"

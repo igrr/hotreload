@@ -9,7 +9,7 @@
 
 #include "elf.h"
 #include "esp_err.h"
-#include "include/elf_parser.h"
+#include "elf_parser.h"
 
 struct elf_parser;
 
