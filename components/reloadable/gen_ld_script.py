@@ -47,7 +47,7 @@ def main():
             undef_symbols.remove(symbol_name)
 
 
-    with open(args.output_ld_script, 'a') as f:
+    with open(args.output_ld_script, 'w') as f:
         for symbol in def_symbols:
             f.write(f'{symbol[0]} = 0x{symbol[1]};\n')
 

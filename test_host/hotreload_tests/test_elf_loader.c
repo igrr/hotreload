@@ -971,3 +971,108 @@ TEST_CASE("elf_loader_get_symbol returns NULL for NULL name", "[elf_loader][symb
     void *sym = elf_loader_get_symbol(&ctx, NULL);
     TEST_ASSERT_NULL(sym);
 }
+
+// ============================================================================
+// Function Call test - actually execute loaded code
+// ============================================================================
+
+TEST_CASE("loaded reloadable_init can be called", "[elf_loader][call]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+
+    // Full loading workflow
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_apply_relocations(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_sync_cache(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Get symbol and call it
+    typedef void (*init_fn_t)(void);
+    init_fn_t init_fn = (init_fn_t)elf_loader_get_symbol(&ctx, "reloadable_init");
+    TEST_ASSERT_NOT_NULL_MESSAGE(init_fn, "reloadable_init not found");
+
+    // Call the loaded function - this is the real test!
+    printf("Calling reloadable_init at %p...\n", init_fn);
+    init_fn();
+    printf("reloadable_init returned successfully!\n");
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
+// Test calling reloadable_hello which uses external symbols (printf, esp_get_idf_version)
+// This verifies JMP_SLOT/PLT relocations are applied correctly for external function calls.
+TEST_CASE("loaded reloadable_hello can be called", "[elf_loader][call]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+
+    // Full loading workflow
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_apply_relocations(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_sync_cache(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // First call init
+    typedef void (*init_fn_t)(void);
+    init_fn_t init_fn = (init_fn_t)elf_loader_get_symbol(&ctx, "reloadable_init");
+    TEST_ASSERT_NOT_NULL(init_fn);
+    init_fn();
+
+    // Now call hello - this uses printf which tests external symbol resolution
+    typedef void (*hello_fn_t)(const char *);
+    hello_fn_t hello_fn = (hello_fn_t)elf_loader_get_symbol(&ctx, "reloadable_hello");
+    TEST_ASSERT_NOT_NULL_MESSAGE(hello_fn, "reloadable_hello not found");
+
+    printf("Calling reloadable_hello at %p...\n", hello_fn);
+    hello_fn("ELF Loader Test");
+    printf("reloadable_hello returned successfully!\n");
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
