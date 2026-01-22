@@ -7,8 +7,14 @@ idf.py extensions for hotreload component.
 Provides commands:
   - idf.py reload: Build and send reloadable ELF to device over HTTP
   - idf.py watch: Watch source files and auto-reload on changes
+
+The watch command can be combined with monitor or qemu commands:
+  - idf.py watch --url <url> monitor
+  - idf.py watch --url <url> qemu monitor
 """
 
+import atexit
+import fnmatch
 import hashlib
 import os
 import subprocess
@@ -21,6 +27,101 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 import click
+
+
+def yellow_print(message: str, newline: str = '\n') -> None:
+    """Print a message to stderr with yellow highlighting."""
+    sys.stderr.write(f'\033[0;33m{message}\033[0m{newline}')
+    sys.stderr.flush()
+
+
+class WatchOptions:
+    """Shared state for watch command when combined with other commands."""
+
+    def __init__(self) -> None:
+        self.background_mode = False
+        self._stop_event: Optional[threading.Event] = None
+        self._watcher_thread: Optional[threading.Thread] = None
+
+    def start_background_watcher(
+        self,
+        project: Path,
+        build_dir: Path,
+        url: str,
+        source_dirs: List[Path],
+        extensions: Set[str],
+        debounce: float,
+        poll_interval: float,
+        verbose: bool,
+    ) -> None:
+        """Start the file watcher in a background thread."""
+        self._stop_event = threading.Event()
+
+        def watcher_loop() -> None:
+            watcher = FileWatcher(source_dirs, extensions, debounce)
+            reload_count = 0
+
+            while not self._stop_event.is_set():
+                changed_files = watcher.check_for_changes()
+
+                if changed_files:
+                    reload_count += 1
+                    yellow_print(f"\n[hotreload] Changes detected ({reload_count}):")
+                    for f in sorted(changed_files):
+                        try:
+                            rel_path = f.relative_to(project)
+                        except ValueError:
+                            rel_path = f
+                        yellow_print(f"  {rel_path}")
+
+                    # Build
+                    yellow_print("[hotreload] Building...")
+                    result = subprocess.run(
+                        ["idf.py", "build"],
+                        cwd=project,
+                        capture_output=True,
+                    )
+
+                    if result.returncode != 0:
+                        yellow_print("[hotreload] Build FAILED!")
+                        if verbose:
+                            yellow_print(result.stdout.decode() if result.stdout else "")
+                            yellow_print(result.stderr.decode() if result.stderr else "")
+                        else:
+                            stderr = result.stderr.decode() if result.stderr else ""
+                            for line in stderr.split("\n"):
+                                if "error:" in line.lower():
+                                    yellow_print(f"  {line.strip()}")
+                        continue
+
+                    yellow_print("[hotreload] Build successful.")
+
+                    # Find and upload ELF
+                    elf_path = _find_reloadable_elf(build_dir)
+                    if not elf_path:
+                        yellow_print("[hotreload] Error: No reloadable ELF found.")
+                        continue
+
+                    yellow_print(f"[hotreload] Uploading {elf_path.name}...")
+                    if _upload_and_reload(url, elf_path, verbose):
+                        yellow_print("[hotreload] Reload successful!")
+                    else:
+                        yellow_print("[hotreload] Reload FAILED!")
+
+                self._stop_event.wait(poll_interval)
+
+        self._watcher_thread = threading.Thread(target=watcher_loop, daemon=True)
+        self._watcher_thread.start()
+
+        # Register cleanup on exit
+        atexit.register(self.stop_background_watcher)
+
+    def stop_background_watcher(self) -> None:
+        """Stop the background watcher thread."""
+        if self._stop_event:
+            self._stop_event.set()
+        if self._watcher_thread and self._watcher_thread.is_alive():
+            self._watcher_thread.join(timeout=2.0)
 
 
 def _get_main_app_hash(build_dir: Path) -> Optional[str]:
@@ -168,6 +269,31 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
     Returns:
         Dictionary with version, actions, and options
     """
+    # Shared state for watch command coordination
+    watch_options = WatchOptions()
+
+    def global_callback(
+        ctx: click.Context,
+        global_args: Dict,
+        tasks: List,
+    ) -> None:
+        """
+        Callback that runs before any commands execute.
+
+        Detects when 'watch' is combined with 'monitor' or 'qemu' and
+        configures background mode accordingly.
+        """
+
+        def have_task(name: str) -> bool:
+            return any(fnmatch.fnmatch(task.name, name) for task in tasks)
+
+        have_watch = have_task("watch")
+        have_monitor = have_task("monitor")
+        have_qemu = have_task("qemu")
+
+        # If watch is combined with monitor or qemu, run watch in background
+        if have_watch and (have_monitor or have_qemu):
+            watch_options.background_mode = True
 
     def reload_callback(
         action: str,
@@ -303,12 +429,29 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
 
         extensions = {".c", ".h", ".cpp", ".hpp", ".cc", ".cxx"}
 
-        print(f"Watching for changes in:")
+        yellow_print(f"[hotreload] Watching for changes in:")
         for src_dir in source_dirs:
-            print(f"  {src_dir.relative_to(project)}")
-        print(f"\nDevice URL: {url}")
-        print(f"Debounce: {debounce}s")
-        print("\nPress Ctrl+C to stop.\n")
+            yellow_print(f"  {src_dir.relative_to(project)}")
+        yellow_print(f"[hotreload] Device URL: {url}")
+
+        # Background mode: start watcher in thread and return immediately
+        if watch_options.background_mode:
+            yellow_print("[hotreload] Running in background mode (combined with monitor/qemu)")
+            watch_options.start_background_watcher(
+                project=project,
+                build_dir=build_dir,
+                url=url,
+                source_dirs=source_dirs,
+                extensions=extensions,
+                debounce=debounce,
+                poll_interval=poll_interval,
+                verbose=verbose,
+            )
+            return
+
+        # Foreground mode: run blocking watch loop
+        yellow_print(f"[hotreload] Debounce: {debounce}s")
+        yellow_print("[hotreload] Press Ctrl+C to stop.\n")
 
         watcher = FileWatcher(source_dirs, extensions, debounce)
         reload_count = 0
@@ -376,6 +519,7 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
 
     return {
         "version": "1.0",
+        "global_action_callbacks": [global_callback],
         "actions": {
             "reload": {
                 "callback": reload_callback,
@@ -425,7 +569,12 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
                     "2. Watches their source files (*.c, *.h, etc.)\n"
                     "3. On change, rebuilds and uploads to device\n"
                     "4. Continues watching until Ctrl+C\n\n"
-                    "The device must be running the hotreload HTTP server."
+                    "The device must be running the hotreload HTTP server.\n\n"
+                    "Can be combined with monitor or qemu commands:\n"
+                    "  idf.py watch --url <url> monitor\n"
+                    "  idf.py watch --url <url> qemu monitor\n\n"
+                    "In combined mode, the watcher runs in background while "
+                    "monitor/qemu runs in foreground."
                 ),
                 "options": [
                     {
