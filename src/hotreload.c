@@ -12,6 +12,11 @@
 
 static const char *TAG = "hotreload";
 
+// Symbol table - defined by the reloadable component, populated by us
+extern uint32_t hotreload_symbol_table[];
+extern const char *const hotreload_symbol_names[];
+extern const size_t hotreload_symbol_count;
+
 // Global state for the currently loaded ELF
 static elf_loader_ctx_t s_loader_ctx;
 static esp_partition_mmap_handle_t s_mmap_handle;
@@ -27,11 +32,8 @@ static void *s_post_hook_ctx = NULL;
 // Forward declarations
 esp_err_t hotreload_unload(void);
 
-// Helper function to perform ELF loading steps (shared by load and load_from_buffer)
-static esp_err_t do_elf_load(const void *elf_data, size_t elf_size,
-                              uint32_t *symbol_table,
-                              const char *const *symbol_names,
-                              size_t symbol_count)
+// Helper function to perform ELF loading steps
+static esp_err_t do_elf_load(const void *elf_data, size_t elf_size)
 {
     esp_err_t err;
 
@@ -83,8 +85,8 @@ static esp_err_t do_elf_load(const void *elf_data, size_t elf_size,
     }
 
     // Populate the symbol table
-    for (size_t i = 0; i < symbol_count; i++) {
-        const char *name = symbol_names[i];
+    for (size_t i = 0; i < hotreload_symbol_count; i++) {
+        const char *name = hotreload_symbol_names[i];
         if (name == NULL) {
             break;  // Sentinel reached
         }
@@ -92,9 +94,9 @@ static esp_err_t do_elf_load(const void *elf_data, size_t elf_size,
         void *addr = elf_loader_get_symbol(&s_loader_ctx, name);
         if (addr == NULL) {
             ESP_LOGW(TAG, "Symbol '%s' not found in ELF", name);
-            symbol_table[i] = 0;
+            hotreload_symbol_table[i] = 0;
         } else {
-            symbol_table[i] = (uint32_t)(uintptr_t)addr;
+            hotreload_symbol_table[i] = (uint32_t)(uintptr_t)addr;
             ESP_LOGD(TAG, "Symbol[%d] '%s' = %p", (int)i, name, addr);
         }
     }
@@ -108,9 +110,7 @@ esp_err_t hotreload_load(const hotreload_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (config->partition_label == NULL ||
-        config->symbol_table == NULL ||
-        config->symbol_names == NULL) {
+    if (config->partition_label == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -136,9 +136,8 @@ esp_err_t hotreload_load(const hotreload_config_t *config)
         return err;
     }
 
-    // Perform ELF loading using shared helper
-    err = do_elf_load(mmap_ptr, partition->size,
-                      config->symbol_table, config->symbol_names, config->symbol_count);
+    // Perform ELF loading
+    err = do_elf_load(mmap_ptr, partition->size);
     if (err != ESP_OK) {
         esp_partition_munmap(s_mmap_handle);
         s_mmap_handle = 0;
@@ -175,12 +174,9 @@ esp_err_t hotreload_unload(void)
     return ESP_OK;
 }
 
-esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size,
-                                     uint32_t *symbol_table,
-                                     const char *const *symbol_names,
-                                     size_t symbol_count)
+esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size)
 {
-    if (elf_data == NULL || symbol_table == NULL || symbol_names == NULL) {
+    if (elf_data == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -189,7 +185,7 @@ esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size,
         hotreload_unload();
     }
 
-    esp_err_t err = do_elf_load(elf_data, elf_size, symbol_table, symbol_names, symbol_count);
+    esp_err_t err = do_elf_load(elf_data, elf_size);
     if (err != ESP_OK) {
         return err;
     }

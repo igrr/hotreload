@@ -1,6 +1,6 @@
-# ESP32 Hot Reload Component
+# ESP-IDF Hot Reload Component
 
-Runtime hot reload for ESP32 - load and reload ELF modules without reflashing. Enables rapid iteration during development by updating code over HTTP while the device keeps running.
+Runtime hot reload for ESP chips - load and reload ELF modules without reflashing. Enables rapid iteration during development by updating code over HTTP while the device keeps running.
 
 ## Features
 
@@ -95,11 +95,11 @@ Create an empty `dummy.c` file (required by ESP-IDF component system).
 ```c
 #include "hotreload.h"
 #include "reloadable.h"      // Your reloadable API
-#include "reloadable_util.h" // Generated: symbol table definitions
 
 void app_main(void) {
     // Load the reloadable ELF from flash
-    esp_err_t err = HOTRELOAD_LOAD_DEFAULT();
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+    esp_err_t err = hotreload_load(&config);
     if (err != ESP_OK) {
         printf("Failed to load: %s\n", esp_err_to_name(err));
         return;
@@ -141,13 +141,13 @@ Start the HTTP server to enable over-the-air updates:
 
 ```c
 #include "hotreload.h"
-#include "reloadable_util.h"
 
 void app_main(void) {
     // Initialize WiFi first...
 
     // Start HTTP server
-    esp_err_t err = HOTRELOAD_SERVER_START_DEFAULT();
+    hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
+    esp_err_t err = hotreload_server_start(&server_config);
     if (err != ESP_OK) {
         printf("Server failed: %s\n", esp_err_to_name(err));
         return;
@@ -222,14 +222,8 @@ The watch command:
 // Load from flash partition
 esp_err_t hotreload_load(const hotreload_config_t *config);
 
-// Convenience macro using generated symbol table
-esp_err_t HOTRELOAD_LOAD_DEFAULT();
-
 // Load from RAM buffer
-esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size,
-                                     uint32_t *symbol_table,
-                                     const char *const *symbol_names,
-                                     size_t symbol_count);
+esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size);
 
 // Unload current ELF
 esp_err_t hotreload_unload(void);
@@ -260,9 +254,6 @@ esp_err_t hotreload_update_partition(const char *partition_label,
 // Start server with custom config
 esp_err_t hotreload_server_start(const hotreload_server_config_t *config);
 
-// Convenience macro with defaults (port 8080, 128KB max)
-esp_err_t HOTRELOAD_SERVER_START_DEFAULT();
-
 // Stop server
 esp_err_t hotreload_server_stop(void);
 ```
@@ -274,10 +265,12 @@ esp_err_t hotreload_server_stop(void);
 ```c
 typedef struct {
     const char *partition_label;     // Partition name (default: "hotreload")
-    uint32_t *symbol_table;          // Pointer to symbol table array
-    const char *const *symbol_names; // NULL-terminated symbol name array
-    size_t symbol_count;             // Number of symbols
 } hotreload_config_t;
+
+// Default configuration
+#define HOTRELOAD_CONFIG_DEFAULT() { \
+    .partition_label = "hotreload", \
+}
 ```
 
 ### hotreload_server_config_t
@@ -287,10 +280,14 @@ typedef struct {
     uint16_t port;                   // HTTP port (default: 8080)
     const char *partition_label;     // Partition for uploads
     size_t max_elf_size;             // Max upload size (default: 128KB)
-    uint32_t *symbol_table;          // Symbol table for reloads
-    const char *const *symbol_names; // Symbol names
-    size_t symbol_count;             // Symbol count
 } hotreload_server_config_t;
+
+// Default configuration
+#define HOTRELOAD_SERVER_CONFIG_DEFAULT() { \
+    .port = 8080, \
+    .partition_label = "hotreload", \
+    .max_elf_size = 128 * 1024, \
+}
 ```
 
 ## How It Works

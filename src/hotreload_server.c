@@ -93,9 +93,6 @@ static esp_err_t reload_post_handler(httpd_req_t *req)
 
     hotreload_config_t config = {
         .partition_label = s_config.partition_label,
-        .symbol_table = s_config.symbol_table,
-        .symbol_names = s_config.symbol_names,
-        .symbol_count = s_config.symbol_count,
     };
 
     esp_err_t err = hotreload_reload(&config);
@@ -123,9 +120,6 @@ static esp_err_t upload_and_reload_post_handler(httpd_req_t *req)
     // Then reload
     hotreload_config_t config = {
         .partition_label = s_config.partition_label,
-        .symbol_table = s_config.symbol_table,
-        .symbol_names = s_config.symbol_names,
-        .symbol_count = s_config.symbol_count,
     };
 
     err = hotreload_reload(&config);
@@ -149,10 +143,6 @@ static esp_err_t status_get_handler(httpd_req_t *req)
 esp_err_t hotreload_server_start(const hotreload_server_config_t *config)
 {
     if (config == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (config->symbol_table == NULL || config->symbol_names == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 

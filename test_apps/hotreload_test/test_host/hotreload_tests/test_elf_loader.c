@@ -5,8 +5,12 @@
 #include "elf_loader.h"
 #include "hotreload.h"
 #include "esp_partition.h"
-#include "reloadable_util.h"
 #include "reloadable.h"
+
+// Symbol table externs for test access
+extern uint32_t hotreload_symbol_table[];
+extern const char *const hotreload_symbol_names[];
+extern const size_t hotreload_symbol_count;
 
 /**
  * Test file for ELF loader functionality.
@@ -1086,12 +1090,7 @@ TEST_CASE("loaded reloadable_hello can be called", "[elf_loader][call]")
 
 TEST_CASE("hotreload_load succeeds with valid config", "[hotreload][api]")
 {
-    hotreload_config_t config = {
-        .partition_label = "hotreload",
-        .symbol_table = hotreload_symbol_table,
-        .symbol_names = hotreload_symbol_names,
-        .symbol_count = hotreload_symbol_count,
-    };
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
 
     esp_err_t err = hotreload_load(&config);
     TEST_ASSERT_EQUAL(ESP_OK, err);
@@ -1110,7 +1109,8 @@ TEST_CASE("hotreload_load populates symbol table correctly", "[hotreload][api]")
         hotreload_symbol_table[i] = 0;
     }
 
-    esp_err_t err = HOTRELOAD_LOAD_DEFAULT();
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+    esp_err_t err = hotreload_load(&config);
     TEST_ASSERT_EQUAL(ESP_OK, err);
 
     // All symbols should be populated
@@ -1132,9 +1132,6 @@ TEST_CASE("hotreload_load rejects missing partition", "[hotreload][api]")
 {
     hotreload_config_t config = {
         .partition_label = "nonexistent_partition",
-        .symbol_table = hotreload_symbol_table,
-        .symbol_names = hotreload_symbol_names,
-        .symbol_count = hotreload_symbol_count,
     };
 
     esp_err_t err = hotreload_load(&config);
@@ -1157,7 +1154,8 @@ TEST_CASE("hotreload_unload returns error when not loaded", "[hotreload][api]")
 TEST_CASE("reloadable functions can be called through stubs", "[hotreload][stubs]")
 {
     // Load the ELF using high-level API
-    esp_err_t err = HOTRELOAD_LOAD_DEFAULT();
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+    esp_err_t err = hotreload_load(&config);
     TEST_ASSERT_EQUAL(ESP_OK, err);
 
     // Call through the stubs (generated ASM trampolines)

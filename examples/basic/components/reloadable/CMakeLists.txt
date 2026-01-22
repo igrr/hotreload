@@ -6,7 +6,7 @@
 # requires at least one source file.
 idf_component_register(
     INCLUDE_DIRS "include"
-    PRIV_REQUIRES esp_system hotreload
+    PRIV_REQUIRES esp_system
     SRCS dummy.c
 )
 

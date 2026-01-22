@@ -7,7 +7,6 @@
 #include "freertos/task.h"
 #include "protocol_examples_common.h"
 #include "hotreload.h"
-#include "reloadable_util.h"
 #include "reloadable.h"
 
 static const char *TAG = "app_main";
@@ -50,7 +49,8 @@ TEST_CASE("hotreload_integration", "[integration]")
     ESP_LOGI(TAG, "Network connected");
 
     // Load the initial reloadable ELF
-    ret = HOTRELOAD_LOAD_DEFAULT();
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+    ret = hotreload_load(&config);
     TEST_ASSERT_EQUAL(ESP_OK, ret);
     ESP_LOGI(TAG, "Initial ELF loaded successfully");
 
@@ -59,7 +59,8 @@ TEST_CASE("hotreload_integration", "[integration]")
     reloadable_hello("from initial load");
 
     // Start the HTTP server for hot reload
-    ret = HOTRELOAD_SERVER_START_DEFAULT();
+    hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
+    ret = hotreload_server_start(&server_config);
     TEST_ASSERT_EQUAL(ESP_OK, ret);
     ESP_LOGI(TAG, "Hotreload server started on port 8080");
     ESP_LOGI(TAG, "Ready for hot reload updates!");
@@ -76,7 +77,7 @@ TEST_CASE("hotreload_integration", "[integration]")
 
 void app_main(void)
 {
-    printf("\n=== ESP32 Hot Reload Test Application ===\n");
+    printf("\n=== ESP-IDF Hot Reload Test Application ===\n");
     printf("Use Unity menu to select tests or integration mode.\n\n");
 
     // Use Unity interactive menu

@@ -1,6 +1,6 @@
 # Basic Hot Reload Example
 
-This example demonstrates the ESP32 hot reload component with:
+This example demonstrates the ESP-IDF hot reload component with:
 - A simple reloadable component with runtime-updatable functions
 - HTTP server for over-the-air code updates
 
@@ -25,7 +25,7 @@ basic/
 ### Prerequisites
 
 - ESP-IDF v5.0 or later
-- ESP32 development board
+- ESP development board
 
 ### Build and Flash
 
@@ -39,7 +39,7 @@ idf.py build flash monitor
 
 ```
 ========================================
-   ESP32 Hot Reload Example
+   ESP-IDF Hot Reload Example
 ========================================
 
 I (xxx) hotreload_example: Connecting to network...
@@ -49,22 +49,33 @@ I (xxx) hotreload_example: Module loaded successfully!
 Hello, World, from v5.x.x! 0
 I (xxx) hotreload_example: Hot reload server running on port 8080
 I (xxx) hotreload_example: To update code: idf.py reload --url http://<device-ip>:8080
+I (xxx) hotreload_example: To watch and auto-reload: idf.py watch --url http://<device-ip>:8080
 ```
 
 ## Updating Code at Runtime
 
-### Method 1: Using idf.py reload (Recommended)
+### Method 1: Using idf.py watch (Recommended)
 
-The easiest way to update code is with the `idf.py reload` command:
+The easiest way to update code is with the `idf.py watch` command, which watches for file changes and automatically rebuilds and uploads:
+
+```bash
+idf.py watch --url http://<device-ip>:8080
+```
+
+Now simply edit `reloadable.c` and save - the changes will be automatically built and uploaded!
+
+### Method 2: Using idf.py reload
+
+For manual rebuilds, use the `idf.py reload` command:
 
 ```bash
 # Modify reloadable.c, then:
 idf.py reload --url http://<device-ip>:8080
 ```
 
-This will automatically rebuild and upload the new code.
+This will rebuild and upload the new code once.
 
-### Method 2: Flash Directly
+### Method 3: Flash Directly
 
 Flash just the reloadable partition (requires physical connection):
 
@@ -72,7 +83,7 @@ Flash just the reloadable partition (requires physical connection):
 idf.py build hotreload-flash
 ```
 
-### Method 3: HTTP Upload with curl
+### Method 4: HTTP Upload with curl
 
 ```bash
 # Build first
@@ -113,20 +124,21 @@ The main app loads and calls the reloadable code:
 ```c
 #include "hotreload.h"
 #include "reloadable.h"
-#include "reloadable_util.h"
 
 void app_main(void)
 {
     // Initialize WiFi...
 
     // Load reloadable ELF from flash
-    HOTRELOAD_LOAD_DEFAULT();
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+    hotreload_load(&config);
 
     // Call through generated stubs
     reloadable_hello("World");
 
     // Start HTTP server for OTA updates
-    HOTRELOAD_SERVER_START_DEFAULT();
+    hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
+    hotreload_server_start(&server_config);
 }
 ```
 
@@ -164,7 +176,7 @@ If you see "No 'hotreload' partition found":
 
 ### Load Failures
 
-If `HOTRELOAD_LOAD_DEFAULT()` fails:
+If `hotreload_load()` fails:
 - Check that the hotreload partition was flashed
 - Verify the ELF is valid with `readelf -h build/esp-idf/reloadable/reloadable_stripped.so`
 

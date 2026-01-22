@@ -19,10 +19,18 @@ extern "C" {
  */
 typedef struct {
     const char *partition_label;    /**< Name of partition containing the reloadable ELF */
-    uint32_t *symbol_table;         /**< Pointer to symbol table to populate */
-    const char *const *symbol_names; /**< NULL-terminated array of symbol names to look up */
-    size_t symbol_count;            /**< Number of symbols (excludes NULL terminator) */
 } hotreload_config_t;
+
+/**
+ * @brief Default hotreload configuration
+ *
+ * Usage:
+ *   hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+ *   ESP_ERROR_CHECK(hotreload_load(&config));
+ */
+#define HOTRELOAD_CONFIG_DEFAULT() { \
+    .partition_label = "hotreload", \
+}
 
 /**
  * @brief Load a reloadable ELF from flash partition
@@ -39,7 +47,7 @@ typedef struct {
  * After successful return, calling functions through the generated stubs
  * (which read from symbol_table) will execute the loaded code.
  *
- * @param config Configuration specifying partition and symbol table
+ * @param config Configuration specifying partition
  * @return
  *      - ESP_OK: Success, symbol table populated
  *      - ESP_ERR_INVALID_ARG: Invalid arguments
@@ -49,26 +57,6 @@ typedef struct {
  *      - Other errors from partition or ELF loader APIs
  */
 esp_err_t hotreload_load(const hotreload_config_t *config);
-
-/**
- * @brief Convenience macro to load reloadable component with default settings
- *
- * Uses the generated hotreload_symbol_table, hotreload_symbol_names,
- * and hotreload_symbol_count from the reloadable component.
- *
- * Usage:
- *   #include "hotreload.h"
- *   #include "reloadable_util.h"  // For symbol table definitions
- *
- *   esp_err_t err = HOTRELOAD_LOAD_DEFAULT();
- */
-#define HOTRELOAD_LOAD_DEFAULT() \
-    hotreload_load(&(hotreload_config_t){ \
-        .partition_label = "hotreload", \
-        .symbol_table = hotreload_symbol_table, \
-        .symbol_names = hotreload_symbol_names, \
-        .symbol_count = hotreload_symbol_count, \
-    })
 
 /**
  * @brief Unload the currently loaded reloadable ELF
@@ -91,18 +79,12 @@ esp_err_t hotreload_unload(void);
  *
  * @param elf_data Pointer to ELF data in RAM
  * @param elf_size Size of ELF data in bytes
- * @param symbol_table Pointer to symbol table to populate
- * @param symbol_names NULL-terminated array of symbol names
- * @param symbol_count Number of symbols
  * @return
  *      - ESP_OK: Success
  *      - ESP_ERR_INVALID_ARG: Invalid arguments
  *      - Other errors from ELF loader
  */
-esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size,
-                                     uint32_t *symbol_table,
-                                     const char *const *symbol_names,
-                                     size_t symbol_count);
+esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size);
 
 /**
  * @brief Write ELF data to the hotreload partition
@@ -179,10 +161,20 @@ typedef struct {
     uint16_t port;                  /**< HTTP server port (default: 8080) */
     const char *partition_label;    /**< Partition for storing uploaded ELF (default: "hotreload") */
     size_t max_elf_size;            /**< Maximum ELF size to accept (default: 128KB) */
-    uint32_t *symbol_table;         /**< Symbol table to populate on reload */
-    const char *const *symbol_names; /**< Symbol names array */
-    size_t symbol_count;            /**< Number of symbols */
 } hotreload_server_config_t;
+
+/**
+ * @brief Default hotreload server configuration
+ *
+ * Usage:
+ *   hotreload_server_config_t config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
+ *   ESP_ERROR_CHECK(hotreload_server_start(&config));
+ */
+#define HOTRELOAD_SERVER_CONFIG_DEFAULT() { \
+    .port = 8080, \
+    .partition_label = "hotreload", \
+    .max_elf_size = 128 * 1024, \
+}
 
 /**
  * @brief Start the hotreload HTTP server
@@ -210,28 +202,6 @@ esp_err_t hotreload_server_start(const hotreload_server_config_t *config);
  *      - ESP_ERR_INVALID_STATE: Server not running
  */
 esp_err_t hotreload_server_stop(void);
-
-/**
- * @brief Convenience macro to start server with default settings
- *
- * Uses the generated hotreload_symbol_table, hotreload_symbol_names,
- * and hotreload_symbol_count from the reloadable component.
- *
- * Usage:
- *   #include "hotreload.h"
- *   #include "reloadable_util.h"
- *
- *   esp_err_t err = HOTRELOAD_SERVER_START_DEFAULT();
- */
-#define HOTRELOAD_SERVER_START_DEFAULT() \
-    hotreload_server_start(&(hotreload_server_config_t){ \
-        .port = 8080, \
-        .partition_label = "hotreload", \
-        .max_elf_size = 128 * 1024, \
-        .symbol_table = hotreload_symbol_table, \
-        .symbol_names = hotreload_symbol_names, \
-        .symbol_count = hotreload_symbol_count, \
-    })
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Espressif Systems
 # SPDX-License-Identifier: MIT
 
-# ESP32 Hot Reload Component
+# ESP-IDF Hot Reload Component
 # Provides runtime ELF loading and hot reload functionality
 
 idf_component_register(
@@ -12,6 +12,8 @@ idf_component_register(
         "src/hotreload_server.c"
     INCLUDE_DIRS
         "include"
+    PRIV_INCLUDE_DIRS
+        "private_include"
     PRIV_REQUIRES
         esp_mm
         esp_partition

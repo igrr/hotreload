@@ -1,7 +1,7 @@
 version: "0.1.0"
 
 description: >
-  Runtime hot reload for ESP32 - load and reload ELF modules without reflashing.
+  Runtime hot reload for ESP chips - load and reload ELF modules without reflashing.
   Enables rapid iteration during development by updating code over HTTP while
   the device keeps running.
 
