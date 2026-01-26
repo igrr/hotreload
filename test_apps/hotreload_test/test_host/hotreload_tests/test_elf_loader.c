@@ -6,6 +6,7 @@
 #include "hotreload.h"
 #include "esp_partition.h"
 #include "reloadable.h"
+#include "soc/soc.h"  // For SOC_I_D_OFFSET on RISC-V targets
 
 // Symbol table externs for test access
 extern uint32_t hotreload_symbol_table[];
@@ -135,7 +136,7 @@ TEST_CASE("elf_reloc_a_get_offset returns valid offset", "[elf_parser][rela]")
     esp_partition_munmap(mmap_handle);
 }
 
-TEST_CASE("elf_reloc_a_get_type returns valid Xtensa relocation type", "[elf_parser][rela]")
+TEST_CASE("elf_reloc_a_get_type returns valid relocation type", "[elf_parser][rela]")
 {
     elf_parser_handle_t parser;
     esp_partition_mmap_handle_t mmap_handle;
@@ -150,16 +151,26 @@ TEST_CASE("elf_reloc_a_get_type returns valid Xtensa relocation type", "[elf_par
     elf_relocation_a_handle_t rela;
     bool found_known_type = false;
 
-    // Known Xtensa relocation types we expect to see
-    // R_XTENSA_NONE=0, R_XTENSA_32=1, R_XTENSA_RTLD=2, R_XTENSA_JMP_SLOT=4,
-    // R_XTENSA_RELATIVE=5, R_XTENSA_PLT=6, R_XTENSA_SLOT0_OP=20
+    // Known relocation types we expect to see
+    // Xtensa: R_XTENSA_NONE=0, R_XTENSA_32=1, R_XTENSA_RTLD=2, R_XTENSA_JMP_SLOT=4,
+    //         R_XTENSA_RELATIVE=5, R_XTENSA_PLT=6, R_XTENSA_SLOT0_OP=20
+    // RISC-V: R_RISCV_NONE=0, R_RISCV_32=1, R_RISCV_RELATIVE=3, R_RISCV_JUMP_SLOT=5,
+    //         R_RISCV_PCREL_HI20=23, R_RISCV_PCREL_LO12_I=24, R_RISCV_RELAX=51
     while (elf_reloc_a_next(parser, &it, &rela)) {
         uint32_t type = elf_reloc_a_get_type(rela);
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
         if (type == 0 || type == 1 || type == 2 || type == 4 ||
             type == 5 || type == 6 || type == 20) {
             found_known_type = true;
             break;
         }
+#elif CONFIG_IDF_TARGET_ARCH_RISCV
+        if (type == 0 || type == 1 || type == 3 || type == 5 ||
+            type == 23 || type == 24 || type == 25 || type == 51) {
+            found_known_type = true;
+            break;
+        }
+#endif
     }
 
     TEST_ASSERT_TRUE(found_known_type);
@@ -900,9 +911,20 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_init", "[elf_loader][symbol]")
     void *sym = elf_loader_get_symbol(&ctx, "reloadable_init");
     TEST_ASSERT_NOT_NULL_MESSAGE(sym, "reloadable_init symbol not found");
 
-    // Symbol should point within the loaded RAM
-    TEST_ASSERT_GREATER_OR_EQUAL((uintptr_t)ctx.ram_base, (uintptr_t)sym);
-    TEST_ASSERT_LESS_THAN((uintptr_t)ctx.ram_base + ctx.ram_size, (uintptr_t)sym);
+    // Symbol should point within the loaded code region
+    // On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
+    // On Xtensa, symbols are DRAM addresses (which are also executable)
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+    // RISC-V: symbol is in IRAM space, which is DRAM + SOC_I_D_OFFSET
+    uintptr_t expected_base = (uintptr_t)ctx.ram_base + SOC_I_D_OFFSET;
+    uintptr_t expected_end = expected_base + ctx.ram_size;
+#else
+    // Xtensa: symbol is directly in DRAM
+    uintptr_t expected_base = (uintptr_t)ctx.ram_base;
+    uintptr_t expected_end = expected_base + ctx.ram_size;
+#endif
+    TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
+    TEST_ASSERT_LESS_THAN(expected_end, (uintptr_t)sym);
 
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
@@ -940,9 +962,17 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_hello", "[elf_loader][symbol]"
     void *sym = elf_loader_get_symbol(&ctx, "reloadable_hello");
     TEST_ASSERT_NOT_NULL_MESSAGE(sym, "reloadable_hello symbol not found");
 
-    // Symbol should point within the loaded RAM
-    TEST_ASSERT_GREATER_OR_EQUAL((uintptr_t)ctx.ram_base, (uintptr_t)sym);
-    TEST_ASSERT_LESS_THAN((uintptr_t)ctx.ram_base + ctx.ram_size, (uintptr_t)sym);
+    // Symbol should point within the loaded code region
+    // On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+    uintptr_t expected_base = (uintptr_t)ctx.ram_base + SOC_I_D_OFFSET;
+    uintptr_t expected_end = expected_base + ctx.ram_size;
+#else
+    uintptr_t expected_base = (uintptr_t)ctx.ram_base;
+    uintptr_t expected_end = expected_base + ctx.ram_size;
+#endif
+    TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
+    TEST_ASSERT_LESS_THAN(expected_end, (uintptr_t)sym);
 
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
