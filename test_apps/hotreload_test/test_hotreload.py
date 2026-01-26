@@ -23,10 +23,10 @@ Run watch + qemu test:
 
 == Hardware Tests ==
 Run unit tests (hardware):
-    pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX
+    pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX
 
 Run e2e test (hardware):
-    pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX
+    pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX
 
 == Using CMake Presets ==
 Build for QEMU:     idf.py --preset esp32-qemu build
@@ -536,7 +536,8 @@ def get_device_ip_from_serial(dut, timeout: int = 60) -> str:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("embedded_services", ["idf"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
 def test_hotreload_unit_tests_hardware(dut):
     """
     Run all unit tests on real hardware via Unity menu.
@@ -553,7 +554,8 @@ def test_hotreload_unit_tests_hardware(dut):
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("embedded_services", ["idf"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
 def test_hot_reload_e2e_hardware(dut, original_code):
     """
     End-to-end test for hot reload functionality on real hardware.
@@ -652,7 +654,8 @@ def test_hot_reload_e2e_hardware(dut, original_code):
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("embedded_services", ["idf"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
 def test_idf_reload_command_hardware(dut, original_code):
     """
     Test the idf.py reload command on real hardware.
@@ -742,9 +745,9 @@ if __name__ == "__main__":
     print("  Watch + qemu:   pytest test_hotreload.py::test_idf_watch_with_qemu -v -s")
     print()
     print("== Hardware Tests ==")
-    print("  Unit tests:     pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX")
-    print("  E2E test:       pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX")
-    print("  Reload cmd:     pytest test_hotreload.py::test_idf_reload_command_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX")
+    print("  Unit tests:     pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX")
+    print("  E2E test:       pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX")
+    print("  Reload cmd:     pytest test_hotreload.py::test_idf_reload_command_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX")
     print()
     print("== Using CMake Presets ==")
     print("  Build QEMU:     idf.py --preset esp32-qemu build")

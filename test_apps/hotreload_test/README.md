@@ -12,8 +12,9 @@ This project uses CMake presets for managing different build configurations. Eac
 |--------|--------|---------|
 | `esp32-qemu` | ESP32 | QEMU emulation testing |
 | `esp32-hardware` | ESP32 | Real ESP32 hardware |
-| `esp32p4-qemu` | ESP32-P4 | QEMU emulation for ESP32-P4 |
 | `esp32p4-hardware` | ESP32-P4 | Real ESP32-P4 hardware |
+
+Note: ESP32-P4 QEMU support is not yet available.
 
 ### List Available Presets
 
@@ -82,19 +83,19 @@ idf.py --preset esp32-hardware build flash --port /dev/cu.usbserial-XXX
 **Run unit tests (hardware):**
 ```bash
 pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s \
-    --embedded-services idf --port /dev/cu.usbserial-XXX
+    --embedded-services esp,idf --port /dev/cu.usbserial-XXX
 ```
 
 **Run E2E integration test (hardware):**
 ```bash
 pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s \
-    --embedded-services idf --port /dev/cu.usbserial-XXX
+    --embedded-services esp,idf --port /dev/cu.usbserial-XXX
 ```
 
 **Run idf.py reload command test (hardware):**
 ```bash
 pytest test_hotreload.py::test_idf_reload_command_hardware -v -s \
-    --embedded-services idf --port /dev/cu.usbserial-XXX
+    --embedded-services esp,idf --port /dev/cu.usbserial-XXX
 ```
 
 ### Manual Testing on Hardware
@@ -119,5 +120,4 @@ Each preset uses a separate build directory:
 
 - `build/esp32-qemu/` - ESP32 QEMU builds
 - `build/esp32-hardware/` - ESP32 hardware builds
-- `build/esp32p4-qemu/` - ESP32-P4 QEMU builds
 - `build/esp32p4-hardware/` - ESP32-P4 hardware builds
