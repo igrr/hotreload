@@ -24,6 +24,28 @@
             }
         },
         {
+            "name": "esp32c3-qemu",
+            "displayName": "ESP32-C3 QEMU",
+            "description": "ESP32-C3 build optimized for QEMU testing",
+            "binaryDir": "build/esp32c3-qemu",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32c3",
+                "SDKCONFIG": "${sourceDir}/build/esp32c3-qemu/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32c3;${sourceDir}/sdkconfig.defaults.qemu"
+            }
+        },
+        {
+            "name": "esp32c3-hardware",
+            "displayName": "ESP32-C3 Hardware",
+            "description": "ESP32-C3 build for real hardware testing",
+            "binaryDir": "build/esp32c3-hardware",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32c3",
+                "SDKCONFIG": "${sourceDir}/build/esp32c3-hardware/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32c3;${sourceDir}/sdkconfig.defaults.hardware"
+            }
+        },
+        {
             "name": "esp32p4-hardware",
             "displayName": "ESP32-P4 Hardware",
             "description": "ESP32-P4 build for real hardware testing",

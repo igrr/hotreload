@@ -130,7 +130,7 @@ def original_code():
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32", "esp32c3"], indirect=True)
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 def test_hotreload_unit_tests(dut):
     """

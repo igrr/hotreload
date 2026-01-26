@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_cache.h"
+#include "soc/soc.h"
 #include "elf_loader.h"
 #include "elf_parser.h"
 
@@ -353,6 +354,11 @@ esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
     return ESP_OK;
 }
 
+// Forward declaration for RISC-V PLT patching (defined after relocation types)
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+static void patch_plt_for_iram(elf_loader_ctx_t *ctx);
+#endif
+
 // Xtensa relocation types
 #define R_XTENSA_NONE       0
 #define R_XTENSA_32         1
@@ -362,10 +368,139 @@ esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
 #define R_XTENSA_PLT        6
 #define R_XTENSA_SLOT0_OP   20
 
+// RISC-V relocation types (from ELF spec)
+#define R_RISCV_NONE        0
+#define R_RISCV_32          1
+#define R_RISCV_64          2
+#define R_RISCV_RELATIVE    3
+#define R_RISCV_COPY        4
+#define R_RISCV_JUMP_SLOT   5
+#define R_RISCV_PCREL_HI20  23
+#define R_RISCV_PCREL_LO12_I 24
+#define R_RISCV_PCREL_LO12_S 25
+#define R_RISCV_HI20        26
+#define R_RISCV_LO12_I      27
+#define R_RISCV_LO12_S      28
+#define R_RISCV_ADD32       35
+#define R_RISCV_SUB6        37
+#define R_RISCV_RVC_BRANCH  44
+#define R_RISCV_RVC_JUMP    45
+#define R_RISCV_RELAX       51
+#define R_RISCV_SET6        53
+#define R_RISCV_SET8        54
+#define R_RISCV_SET16       55
+#define R_RISCV_SET32       56
+
 // Xtensa instruction opcodes (op0 field in bits 0-3)
 #define XTENSA_OP0_L32R     0x01    // Load 32-bit PC-relative
 #define XTENSA_OP0_CALLN    0x05    // Call with window rotate (CALL0/4/8/12)
 #define XTENSA_OP0_J        0x06    // Unconditional jump
+
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+/**
+ * Patch PLT entries for RISC-V when code runs from IRAM but data is in DRAM
+ *
+ * On ESP32-C3/C6, code must be fetched from IRAM (0x403xxxxx) but data loads
+ * must use DRAM addresses (0x3FCxxxxx). The PLT uses PC-relative addressing
+ * (AUIPC + LW) to access the GOT, which fails when PC is in IRAM because
+ * it calculates IRAM addresses for data access.
+ *
+ * This function patches AUIPC instructions in PLT entries to subtract
+ * SOC_I_D_OFFSET, so the resulting address is in DRAM space.
+ *
+ * PLT entry structure (RISC-V):
+ *   auipc t3, hi20(got_entry - pc)
+ *   lw    t3, lo12(got_entry - pc)(t3)
+ *   jalr  t1, t3
+ *   nop
+ *
+ * @param ctx ELF loader context with loaded sections
+ */
+static void patch_plt_for_iram(elf_loader_ctx_t *ctx)
+{
+    elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
+    uintptr_t load_base = (uintptr_t)ctx->ram_base - ctx->vma_base;
+
+    ESP_LOGI(TAG, "Looking for .plt section to patch...");
+
+    // Find .plt section
+    elf_iterator_handle_t it;
+    elf_parser_get_sections_it(parser, &it);
+
+    elf_section_handle_t section;
+    int sec_count = 0;
+    while (elf_section_next(parser, &it, &section)) {
+        sec_count++;
+        char sec_name[32] = {0};
+        esp_err_t err = elf_section_get_name(section, sec_name, sizeof(sec_name));
+        if (err != ESP_OK) {
+            ESP_LOGD(TAG, "Section %d: failed to get name (err=%d)", sec_count, err);
+            continue;
+        }
+
+        ESP_LOGD(TAG, "Section %d: '%s' vma=0x%x size=0x%x",
+                 sec_count, sec_name, elf_section_get_addr(section), elf_section_get_size(section));
+
+        if (strcmp(sec_name, ".plt") != 0) {
+            continue;
+        }
+
+        uintptr_t plt_vma = elf_section_get_addr(section);
+        uint32_t plt_size = elf_section_get_size(section);
+
+        if (plt_vma == 0 || plt_size == 0) {
+            ESP_LOGW(TAG, "Invalid .plt section: vma=0x%x size=%d", plt_vma, plt_size);
+            return;
+        }
+
+        ESP_LOGD(TAG, "Patching .plt section at vma=0x%x size=%d", plt_vma, plt_size);
+
+        // Calculate adjustment for AUIPC: subtract SOC_I_D_OFFSET >> 12 from immediate
+        // AUIPC does: rd = PC + (imm << 12)
+        // We need: rd = PC + (imm << 12) - SOC_I_D_OFFSET
+        // So new_imm = old_imm - (SOC_I_D_OFFSET >> 12)
+        int32_t adjust = -(int32_t)(SOC_I_D_OFFSET >> 12);
+
+        // PLT header is first 16 bytes (different structure), skip it
+        // Each subsequent entry is 16 bytes: auipc(4) + lw(4) + jalr(4) + nop(4)
+        uint32_t *plt_base = (uint32_t *)(load_base + plt_vma);
+
+        // Process PLT header - it has AUIPC at offset 0
+        uint32_t instr = plt_base[0];
+        uint32_t opcode = instr & 0x7F;
+        if (opcode == 0x17) {  // AUIPC opcode
+            // Extract current immediate (bits 31:12)
+            int32_t imm = (int32_t)instr >> 12;
+            int32_t new_imm = imm + adjust;
+            instr = (instr & 0xFFF) | ((uint32_t)new_imm << 12);
+            plt_base[0] = instr;
+            ESP_LOGD(TAG, "Patched PLT header AUIPC: imm 0x%x -> 0x%x", imm & 0xFFFFF, new_imm & 0xFFFFF);
+        }
+
+        // Process each PLT entry (starting at offset 0x20 = 32 bytes from PLT start)
+        // Typical entry: auipc t3, imm; lw t3, offset(t3); jalr t1, t3; nop
+        for (uint32_t offset = 0x20; offset < plt_size; offset += 16) {
+            uint32_t *entry = (uint32_t *)((uint8_t *)plt_base + offset);
+            instr = entry[0];
+            opcode = instr & 0x7F;
+
+            if (opcode == 0x17) {  // AUIPC opcode
+                int32_t imm = (int32_t)instr >> 12;
+                int32_t new_imm = imm + adjust;
+                instr = (instr & 0xFFF) | ((uint32_t)new_imm << 12);
+                entry[0] = instr;
+                ESP_LOGD(TAG, "Patched PLT entry at 0x%x: AUIPC imm 0x%x -> 0x%x",
+                         plt_vma + offset, imm & 0xFFFFF, new_imm & 0xFFFFF);
+            }
+        }
+
+        ESP_LOGI(TAG, "Patched PLT for IRAM/DRAM offset (SOC_I_D_OFFSET=0x%x)", SOC_I_D_OFFSET);
+        return;  // Only one .plt section
+    }
+
+    ESP_LOGW(TAG, ".plt section not found in %d sections, external calls may fail", sec_count);
+}
+#endif  // CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
 
 // Helper to read 24-bit instruction at potentially unaligned address
 static inline uint32_t read_instr24(const uint8_t *ptr)
@@ -499,6 +634,14 @@ esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
         return ESP_ERR_INVALID_STATE;
     }
 
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+    // On RISC-V with separate IRAM/DRAM address spaces (ESP32-C3, C6, etc.),
+    // patch PLT entries so their PC-relative GOT access uses DRAM addresses.
+    // This must be done before processing relocations since PLT entries
+    // will be used when calling external functions.
+    patch_plt_for_iram(ctx);
+#endif
+
     elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
 
     // Calculate load base: where sections were actually loaded
@@ -534,6 +677,10 @@ esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
         uintptr_t location_addr = load_base + offset;
         uint32_t *location = (uint32_t *)location_addr;
 
+        // Architecture-specific relocation handling
+        // Relocation type numbers overlap between Xtensa and RISC-V, so we use
+        // compile-time architecture detection
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
         switch (type) {
             case R_XTENSA_RELATIVE:
                 // Formula: *location = load_base + addend
@@ -583,10 +730,6 @@ esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
                 // The literal pool contents are already relocated by R_XTENSA_32 and
                 // R_XTENSA_JMP_SLOT relocations. The L32R instruction just needs to
                 // load from the correct literal pool entry, which it already does.
-                //
-                // If we were doing COMPACT loading (where sections are packed tightly
-                // instead of preserving VMA layout), we would need to update these
-                // instructions. For now, skip SLOT0_OP relocations.
                 ESP_LOGD(TAG, "SLOT0_OP: skipping (VMA layout preserved), offset=0x%x", offset);
                 break;
             }
@@ -597,9 +740,185 @@ esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
                 break;
 
             default:
-                ESP_LOGW(TAG, "Unknown relocation type %d at offset 0x%x", type, offset);
+                ESP_LOGW(TAG, "Unknown Xtensa relocation type %d at offset 0x%x", type, offset);
                 break;
         }
+#elif CONFIG_IDF_TARGET_ARCH_RISCV
+        switch (type) {
+            case R_RISCV_NONE:
+                // No-op relocation
+                break;
+
+            case R_RISCV_RELATIVE:
+                // Formula: *location = load_base + addend
+                *location = (uint32_t)(load_base + addend);
+                applied_count++;
+                ESP_LOGV(TAG, "R_RISCV_RELATIVE: offset=0x%x -> 0x%x",
+                         offset, *location);
+                break;
+
+            case R_RISCV_32: {
+                // Formula: *location = symbol_value + addend
+                uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
+                *location = (uint32_t)(load_base + sym_val + addend);
+                applied_count++;
+                ESP_LOGV(TAG, "R_RISCV_32: offset=0x%x sym_val=0x%x -> 0x%x",
+                         offset, sym_val, *location);
+                break;
+            }
+
+            case R_RISCV_JUMP_SLOT: {
+                // External function calls through GOT/PLT
+                uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
+                ESP_LOGV(TAG, "R_RISCV_JUMP_SLOT: offset=0x%x sym_val=0x%x", offset, sym_val);
+                if (sym_val != 0) {
+                    *location = (uint32_t)sym_val;
+                    applied_count++;
+                } else {
+                    ESP_LOGW(TAG, "R_RISCV_JUMP_SLOT: unresolved symbol at offset 0x%x", offset);
+                }
+                break;
+            }
+
+            case R_RISCV_PCREL_HI20: {
+                // PC-relative HI20 for AUIPC instruction
+                //
+                // On ESP32-C3, code runs from IRAM but data is accessed from DRAM.
+                // AUIPC calculates: PC + (imm << 12). Since PC is IRAM address but
+                // we need to access DRAM, we must adjust the offset by subtracting
+                // SOC_I_D_OFFSET so that IRAM_PC + adjusted_offset = DRAM_data.
+                //
+                // Formula: S + A - P (symbol + addend - PC)
+                // With IRAM adjustment: S + A - P - SOC_I_D_OFFSET
+                uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
+                uintptr_t sym_addr = load_base + sym_val + addend;
+                uintptr_t pc_addr = load_base + offset;
+
+#if defined(SOC_I_D_OFFSET)
+                // Adjust for IRAM/DRAM offset: code runs from IRAM, data from DRAM
+                int32_t pcrel_offset = (int32_t)(sym_addr - pc_addr - SOC_I_D_OFFSET);
+#else
+                int32_t pcrel_offset = (int32_t)(sym_addr - pc_addr);
+#endif
+
+                // Add 0x800 to compensate for sign-extension in LO12
+                int32_t hi20 = (pcrel_offset + 0x800) >> 12;
+
+                // Read current instruction, preserve opcode (bits 0-11), update imm[31:12]
+                uint32_t instr = *(uint32_t *)location;
+                instr = (instr & 0xFFF) | ((uint32_t)hi20 << 12);
+                *(uint32_t *)location = instr;
+
+                applied_count++;
+                ESP_LOGD(TAG, "R_RISCV_PCREL_HI20: offset=0x%x sym=0x%x pc=0x%x pcrel=%d hi20=0x%x",
+                         offset, sym_addr, pc_addr, pcrel_offset, hi20);
+                break;
+            }
+
+            case R_RISCV_PCREL_LO12_I: {
+                // PC-relative LO12 for I-type instructions (loads, addi, etc.)
+                //
+                // This relocation references a corresponding PCREL_HI20 relocation.
+                // The symbol points to the AUIPC instruction, and we extract the
+                // low 12 bits from the same calculation.
+                uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
+                // sym_val is the address of the AUIPC instruction this refers to
+                uintptr_t auipc_addr = load_base + sym_val;
+                uintptr_t target_addr = auipc_addr + addend;  // The actual data target
+
+#if defined(SOC_I_D_OFFSET)
+                // Same IRAM/DRAM adjustment as HI20
+                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr - SOC_I_D_OFFSET);
+#else
+                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr);
+#endif
+
+                // Calculate lo12 (compensate for hi20 rounding)
+                int32_t hi20 = (pcrel_offset + 0x800) >> 12;
+                int32_t lo12 = pcrel_offset - (hi20 << 12);
+
+                // Read instruction, update immediate in I-type format
+                // I-type: imm[11:0] in bits 31:20
+                uint32_t instr = *(uint32_t *)location;
+                instr = (instr & 0x000FFFFF) | ((uint32_t)(lo12 & 0xFFF) << 20);
+                *(uint32_t *)location = instr;
+
+                applied_count++;
+                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_I: offset=0x%x lo12=0x%x", offset, lo12 & 0xFFF);
+                break;
+            }
+
+            case R_RISCV_PCREL_LO12_S: {
+                // PC-relative LO12 for S-type instructions (stores)
+                // Same calculation as LO12_I but different immediate encoding
+                uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
+                uintptr_t auipc_addr = load_base + sym_val;
+                uintptr_t target_addr = auipc_addr + addend;
+
+#if defined(SOC_I_D_OFFSET)
+                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr - SOC_I_D_OFFSET);
+#else
+                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr);
+#endif
+
+                int32_t hi20 = (pcrel_offset + 0x800) >> 12;
+                int32_t lo12 = pcrel_offset - (hi20 << 12);
+
+                // Read instruction, update immediate in S-type format
+                // S-type: imm[11:5] in bits 31:25, imm[4:0] in bits 11:7
+                uint32_t instr = *(uint32_t *)location;
+                uint32_t imm_11_5 = ((uint32_t)(lo12 & 0xFE0)) << 20;  // bits 11:5 -> 31:25
+                uint32_t imm_4_0 = ((uint32_t)(lo12 & 0x1F)) << 7;     // bits 4:0 -> 11:7
+                instr = (instr & 0x01FFF07F) | imm_11_5 | imm_4_0;
+                *(uint32_t *)location = instr;
+
+                applied_count++;
+                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_S: offset=0x%x lo12=0x%x", offset, lo12 & 0xFFF);
+                break;
+            }
+
+            case R_RISCV_HI20:
+            case R_RISCV_LO12_I:
+            case R_RISCV_LO12_S:
+                // Absolute HI20/LO12 relocations for LUI + load/store/addi
+                // VMA layout preserved, so these should be fine as-is
+                ESP_LOGD(TAG, "R_RISCV_ABS: skipping (VMA layout preserved), type=%d offset=0x%x",
+                         type, offset);
+                break;
+
+            case R_RISCV_RELAX:
+                // Linker relaxation hint - no action needed at load time
+                break;
+
+            case R_RISCV_RVC_BRANCH:
+            case R_RISCV_RVC_JUMP:
+                // Compressed branch/jump instructions (C.BEQZ, C.BNEZ, C.J, C.JAL)
+                // These are PC-relative with 8-bit (branch) or 11-bit (jump) offsets.
+                // Since VMA layout is preserved, the relative offsets are correct.
+                // The jumps to PLT entries work correctly after PLT patching.
+                ESP_LOGD(TAG, "R_RISCV_RVC: skipping (VMA layout preserved), type=%d offset=0x%x",
+                         type, offset);
+                break;
+
+            case R_RISCV_ADD32:
+            case R_RISCV_SUB6:
+            case R_RISCV_SET6:
+            case R_RISCV_SET8:
+            case R_RISCV_SET16:
+            case R_RISCV_SET32:
+                // These are typically used for DWARF debug info and exception tables
+                // Skip for now - not needed for basic code execution
+                ESP_LOGD(TAG, "R_RISCV_ADD/SUB/SET: skipping debug reloc type=%d offset=0x%x",
+                         type, offset);
+                break;
+
+            default:
+                ESP_LOGW(TAG, "Unknown RISC-V relocation type %d at offset 0x%x", type, offset);
+                break;
+        }
+#else
+        #error "Unsupported architecture - expected Xtensa or RISC-V"
+#endif
     }
 
     ESP_LOGI(TAG, "Processed %d relocations, applied %d", reloc_count, applied_count);
@@ -675,9 +994,26 @@ void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
                 continue;
             }
 
-            void *addr = (void *)(load_base + sym_value);
-            ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, addr, sym_value);
-            return addr;
+            uintptr_t dram_addr = load_base + sym_value;
+
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(MAP_DRAM_TO_IRAM)
+            // On RISC-V targets (ESP32-C3, C6, etc.), DRAM and IRAM are mapped
+            // to the same physical memory but at different bus addresses.
+            // Code must be executed from IRAM address space, so we convert
+            // the DRAM address to its IRAM equivalent.
+            //
+            // DRAM: 0x3FC80000 - 0x3FCE0000 (data access)
+            // IRAM: 0x40380000 - 0x403E0000 (instruction fetch)
+            // Offset: SOC_I_D_OFFSET = 0x700000 (for ESP32-C3)
+            uintptr_t iram_addr = MAP_DRAM_TO_IRAM(dram_addr);
+            ESP_LOGD(TAG, "Symbol '%s': DRAM=%p -> IRAM=%p (value=0x%x)",
+                     name, (void *)dram_addr, (void *)iram_addr, sym_value);
+            return (void *)iram_addr;
+#else
+            // On Xtensa targets (ESP32, S2, S3), DRAM is executable
+            ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, (void *)dram_addr, sym_value);
+            return (void *)dram_addr;
+#endif
         }
     }
 
