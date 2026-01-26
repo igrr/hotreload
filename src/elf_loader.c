@@ -18,6 +18,65 @@ static const char *TAG = "elf_loader";
 // Minimum size for a valid ELF header
 #define ELF_HEADER_MIN_SIZE sizeof(Elf32_Ehdr)
 
+/**
+ * 32-bit aligned memcpy for writing to IRAM
+ *
+ * On ESP32, IRAM (instruction RAM) allocated with MALLOC_CAP_EXEC can only
+ * be accessed via 32-bit aligned word operations. Standard memcpy uses byte
+ * operations and will crash on IRAM. This function performs word-aligned copies.
+ *
+ * @param dest Destination address (must be 4-byte aligned)
+ * @param src Source address (can be unaligned, data read byte-by-byte)
+ * @param n Number of bytes to copy (will be rounded up to multiple of 4)
+ */
+static void memcpy_word_aligned(void *dest, const void *src, size_t n)
+{
+    uint32_t *d = (uint32_t *)dest;
+    const uint8_t *s = (const uint8_t *)src;
+
+    // Copy 4 bytes at a time, assembling from source bytes
+    // Source may be unaligned, so read byte-by-byte
+    while (n >= 4) {
+        *d++ = s[0] | ((uint32_t)s[1] << 8) | ((uint32_t)s[2] << 16) | ((uint32_t)s[3] << 24);
+        s += 4;
+        n -= 4;
+    }
+
+    // Handle remaining bytes (pad with zeros)
+    if (n > 0) {
+        uint32_t word = 0;
+        for (size_t i = 0; i < n; i++) {
+            word |= ((uint32_t)s[i] << (i * 8));
+        }
+        *d = word;
+    }
+}
+
+/**
+ * 32-bit aligned memset for writing to IRAM
+ *
+ * On ESP32, IRAM can only be accessed via 32-bit aligned word operations.
+ * Standard memset uses byte operations and will crash. This function fills
+ * memory using word-aligned writes.
+ *
+ * @param dest Destination address (must be 4-byte aligned)
+ * @param val Byte value to fill (will be replicated to all 4 bytes of each word)
+ * @param n Number of bytes to fill (will be rounded up to multiple of 4)
+ */
+static void memset_word_aligned(void *dest, int val, size_t n)
+{
+    uint32_t *d = (uint32_t *)dest;
+    uint8_t byte_val = (uint8_t)val;
+    uint32_t word_val = byte_val | ((uint32_t)byte_val << 8) |
+                        ((uint32_t)byte_val << 16) | ((uint32_t)byte_val << 24);
+
+    // Write 4 bytes at a time
+    size_t words = (n + 3) / 4;  // Round up to include partial words
+    while (words--) {
+        *d++ = word_val;
+    }
+}
+
 // Read callback for elf_parser - reads from memory-mapped ELF data
 static size_t elf_loader_read_cb(void *user_ctx, size_t offset, size_t n_bytes, void *dest)
 {
@@ -270,15 +329,17 @@ esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
 
         if (type == SHT_PROGBITS) {
             // Copy section data from ELF to RAM
+            // Use word-aligned copy for IRAM compatibility (IRAM requires 32-bit access)
             uintptr_t file_offset = elf_section_get_offset(section);
             const void *src = (const uint8_t *)ctx->elf_data + file_offset;
-            memcpy(dest, src, size);
+            memcpy_word_aligned(dest, src, size);
 
             ESP_LOGD(TAG, "Loaded section: vma=0x%x size=0x%x offset=0x%x -> %p",
                      vma, size, file_offset, dest);
         } else {
             // NOBITS section (.bss) - zero the memory
-            memset(dest, 0, size);
+            // Use word-aligned memset for IRAM compatibility
+            memset_word_aligned(dest, 0, size);
 
             ESP_LOGD(TAG, "Zeroed BSS section: vma=0x%x size=0x%x -> %p",
                      vma, size, dest);

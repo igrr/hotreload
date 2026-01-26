@@ -484,10 +484,15 @@ TEST_CASE("elf_loader_allocate sets ram_base to valid memory", "[elf_loader][all
     err = elf_loader_allocate(&ctx);
     TEST_ASSERT_EQUAL(ESP_OK, err);
 
-    // Should be able to write to the allocated memory
-    memset(ctx.ram_base, 0xAA, ctx.ram_size);
-    TEST_ASSERT_EQUAL_UINT8(0xAA, ((uint8_t *)ctx.ram_base)[0]);
-    TEST_ASSERT_EQUAL_UINT8(0xAA, ((uint8_t *)ctx.ram_base)[ctx.ram_size - 1]);
+    // Should be able to write to the allocated memory using 32-bit aligned access
+    // Note: IRAM on ESP32 requires word-aligned access, byte operations will crash
+    uint32_t *ram_words = (uint32_t *)ctx.ram_base;
+    size_t num_words = ctx.ram_size / 4;
+    for (size_t i = 0; i < num_words; i++) {
+        ram_words[i] = 0xAAAAAAAA;
+    }
+    TEST_ASSERT_EQUAL_HEX32(0xAAAAAAAA, ram_words[0]);
+    TEST_ASSERT_EQUAL_HEX32(0xAAAAAAAA, ram_words[num_words - 1]);
 
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
@@ -578,17 +583,22 @@ TEST_CASE("elf_loader_load_sections copies data to RAM", "[elf_loader][load]")
     err = elf_loader_allocate(&ctx);
     TEST_ASSERT_EQUAL(ESP_OK, err);
 
-    // Fill RAM with known pattern before loading
-    memset(ctx.ram_base, 0xCC, ctx.ram_size);
+    // Fill RAM with known pattern before loading using word-aligned writes
+    // Note: IRAM requires 32-bit aligned access, byte operations will crash
+    uint32_t *ram_words = (uint32_t *)ctx.ram_base;
+    size_t num_words = ctx.ram_size / 4;
+    for (size_t i = 0; i < num_words; i++) {
+        ram_words[i] = 0xCCCCCCCC;
+    }
 
     err = elf_loader_load_sections(&ctx);
     TEST_ASSERT_EQUAL(ESP_OK, err);
 
-    // After loading, RAM should NOT be all 0xCC (data was copied)
-    uint8_t *ram = (uint8_t *)ctx.ram_base;
+    // After loading, RAM should NOT be all 0xCCCCCCCC (data was copied)
+    // Use word-aligned reads for IRAM compatibility
     bool found_non_cc = false;
-    for (size_t i = 0; i < ctx.ram_size; i++) {
-        if (ram[i] != 0xCC) {
+    for (size_t i = 0; i < num_words; i++) {
+        if (ram_words[i] != 0xCCCCCCCC) {
             found_non_cc = true;
             break;
         }
@@ -693,11 +703,13 @@ TEST_CASE("elf_loader_apply_relocations modifies loaded data", "[elf_loader][rel
     err = elf_loader_load_sections(&ctx);
     TEST_ASSERT_EQUAL(ESP_OK, err);
 
-    // Calculate checksum before relocations
+    // Calculate checksum before relocations using word-aligned access
+    // Note: IRAM requires 32-bit aligned access, byte operations will crash
     uint32_t checksum_before = 0;
-    uint8_t *ram = (uint8_t *)ctx.ram_base;
-    for (size_t i = 0; i < ctx.ram_size; i++) {
-        checksum_before += ram[i];
+    uint32_t *ram_words = (uint32_t *)ctx.ram_base;
+    size_t num_words = ctx.ram_size / 4;
+    for (size_t i = 0; i < num_words; i++) {
+        checksum_before += ram_words[i];
     }
 
     err = elf_loader_apply_relocations(&ctx);
@@ -705,8 +717,8 @@ TEST_CASE("elf_loader_apply_relocations modifies loaded data", "[elf_loader][rel
 
     // Calculate checksum after relocations
     uint32_t checksum_after = 0;
-    for (size_t i = 0; i < ctx.ram_size; i++) {
-        checksum_after += ram[i];
+    for (size_t i = 0; i < num_words; i++) {
+        checksum_after += ram_words[i];
     }
 
     // Checksum should change (relocations modify data)
