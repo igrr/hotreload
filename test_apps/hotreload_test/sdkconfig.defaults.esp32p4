@@ -1,0 +1,5 @@
+# ESP32-P4 specific configuration
+# This file is applied when building for ESP32-P4 target
+
+# Console via USB-Serial/JTAG (common for ESP32-P4 dev boards)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

@@ -1,0 +1,49 @@
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "esp32-qemu",
+            "displayName": "ESP32 QEMU",
+            "description": "ESP32 build optimized for QEMU testing",
+            "binaryDir": "build/esp32-qemu",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32",
+                "SDKCONFIG": "${sourceDir}/build/esp32-qemu/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.qemu"
+            }
+        },
+        {
+            "name": "esp32-hardware",
+            "displayName": "ESP32 Hardware",
+            "description": "ESP32 build for real hardware testing",
+            "binaryDir": "build/esp32-hardware",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32",
+                "SDKCONFIG": "${sourceDir}/build/esp32-hardware/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.hardware"
+            }
+        },
+        {
+            "name": "esp32p4-qemu",
+            "displayName": "ESP32-P4 QEMU",
+            "description": "ESP32-P4 build optimized for QEMU testing",
+            "binaryDir": "build/esp32p4-qemu",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32p4",
+                "SDKCONFIG": "${sourceDir}/build/esp32p4-qemu/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32p4;${sourceDir}/sdkconfig.defaults.qemu"
+            }
+        },
+        {
+            "name": "esp32p4-hardware",
+            "displayName": "ESP32-P4 Hardware",
+            "description": "ESP32-P4 build for real hardware testing",
+            "binaryDir": "build/esp32p4-hardware",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32p4",
+                "SDKCONFIG": "${sourceDir}/build/esp32p4-hardware/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32p4;${sourceDir}/sdkconfig.defaults.hardware"
+            }
+        }
+    ]
+}

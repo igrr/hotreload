@@ -3,25 +3,36 @@
 Tests for ESP32 hot reload functionality.
 
 This file contains:
-1. Unit tests - run via Unity menu, test ELF loader functions
-2. E2E integration test - tests full hot reload workflow in QEMU
+1. Unit tests - run via Unity menu, test ELF loader functions (QEMU and hardware)
+2. E2E integration test - tests full hot reload workflow
 3. idf.py reload command test - tests the CLI workflow
 4. idf.py watch + qemu combined test - tests background watcher with QEMU
 
-Run unit tests:
+== QEMU Tests ==
+Run unit tests (QEMU):
     pytest test_hotreload.py::test_hotreload_unit_tests -v -s --embedded-services idf,qemu
 
-Run e2e test (HTTP API):
+Run e2e test (QEMU):
     pytest test_hotreload.py::test_hot_reload_e2e -v -s --embedded-services idf,qemu
 
-Run idf.py reload test:
+Run idf.py reload test (QEMU):
     pytest test_hotreload.py::test_idf_reload_command -v -s --embedded-services idf,qemu
 
 Run watch + qemu test:
     pytest test_hotreload.py::test_idf_watch_with_qemu -v -s
 
-Run all tests with idf.py:
-    idf.py run-project --qemu
+== Hardware Tests ==
+Run unit tests (hardware):
+    pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX
+
+Run e2e test (hardware):
+    pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX
+
+== Using CMake Presets ==
+Build for QEMU:     idf.py --preset esp32-qemu build
+Build for hardware: idf.py --preset esp32-hardware build flash
+
+Run all QEMU tests: idf.py --preset esp32-qemu run-project --qemu
 """
 
 import subprocess
@@ -502,10 +513,240 @@ def test_idf_watch_with_qemu(target, original_code):
         print("  Process terminated.")
 
 
+# =============================================================================
+# Hardware Tests (Real ESP32 hardware, no QEMU)
+# =============================================================================
+
+
+def get_device_ip_from_serial(dut, timeout: int = 60) -> str:
+    """
+    Wait for the device to print its IP address and extract it.
+
+    The device typically prints something like:
+    - "Got IP Address: 192.168.1.100" (DHCP)
+    - "Static IP: 192.168.1.100"
+    """
+    # Wait for IP address to be printed
+    match = dut.expect(
+        r"(?:Got IP Address|Static IP|IPv4 address):\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
+        timeout=timeout
+    )
+    ip_address = match.group(1).decode() if isinstance(match.group(1), bytes) else match.group(1)
+    return ip_address
+
+
+@pytest.mark.host_test
+@pytest.mark.parametrize("embedded_services", ["idf"], indirect=True)
+def test_hotreload_unit_tests_hardware(dut):
+    """
+    Run all unit tests on real hardware via Unity menu.
+
+    This test runs on actual ESP32 hardware connected via serial port.
+    Use with: pytest ... --port /dev/cu.usbserial-XXX
+    """
+    print("\n=== Running Unit Tests on Hardware ===\n")
+
+    # Run all tests except integration tests
+    dut.run_all_single_board_cases(group="!integration", timeout=300)
+
+    print("\n=== Unit Tests Complete ===\n")
+
+
+@pytest.mark.host_test
+@pytest.mark.parametrize("embedded_services", ["idf"], indirect=True)
+def test_hot_reload_e2e_hardware(dut, original_code):
+    """
+    End-to-end test for hot reload functionality on real hardware.
+
+    This test:
+    1. Boots the device and waits for network connectivity
+    2. Discovers the device IP address from serial output
+    3. Verifies initial load message
+    4. Modifies and rebuilds the reloadable component
+    5. Uploads new ELF and triggers reload
+    6. Verifies reload succeeded
+
+    Prerequisites:
+    - Device must be connected to a network (Ethernet or WiFi)
+    - Host must be on the same network as the device
+    - Build with hardware preset: idf.py --preset esp32-hardware build flash
+    """
+    print("\n=== Starting Hot Reload E2E Test on Hardware ===\n")
+
+    # Step 0: Wait for Unity menu and select the integration test
+    print("Step 0: Selecting integration test from Unity menu...")
+    dut.expect_exact("Press ENTER to see the list of tests.", timeout=60)
+    dut.write('"hotreload_integration"')
+    print("  Integration test selected!")
+
+    # Step 1: Wait for initial load message
+    print("Step 1: Waiting for initial reloadable function call...")
+    dut.expect(r"Hello.*from initial load", timeout=120)
+    print("  Initial load confirmed!")
+
+    # Step 2: Wait for network and get device IP
+    print("Step 2: Waiting for network connectivity and server...")
+    dut.expect("Hotreload server started on port 8080", timeout=60)
+    print("  Server started!")
+
+    # Get the device's IP address from earlier output
+    # For hardware tests, we need to discover the device IP
+    device_ip = get_device_ip_from_serial(dut, timeout=5)
+    print(f"  Device IP: {device_ip}")
+
+    device_url = f"http://{device_ip}:8080"
+
+    # Give the network stack a moment to be fully ready
+    time.sleep(3)
+
+    # Step 3: Verify server is accessible
+    print(f"Step 3: Verifying server is accessible at {device_url}...")
+    for i in range(15):
+        try:
+            response = requests.get(f"{device_url}/status", timeout=5)
+            if response.status_code == 200:
+                print(f"  Server responding at {device_url}")
+                break
+        except requests.exceptions.RequestException:
+            pass
+        print(f"  Attempt {i+1}/15 - waiting...")
+        time.sleep(1)
+    else:
+        pytest.fail(f"Server not accessible at {device_url} after 15 attempts")
+
+    # Step 4: Modify reloadable code
+    print("Step 4: Modifying reloadable code (Hello -> Goodbye)...")
+    modify_reloadable_code("Goodbye")
+    print("  Code modified!")
+
+    # Step 5: Rebuild
+    print("Step 5: Rebuilding reloadable component...")
+    rebuild_reloadable()
+    print("  Build successful!")
+
+    # Step 6: Upload and reload
+    print("Step 6: Uploading new ELF and triggering reload...")
+    url = f"{device_url}/upload-and-reload"
+    with open(RELOADABLE_ELF, "rb") as f:
+        elf_data = f.read()
+    print(f"  Uploading {len(elf_data)} bytes to {url}")
+    response = requests.post(
+        url,
+        data=elf_data,
+        headers={"Content-Type": "application/octet-stream"},
+        timeout=30,
+    )
+    print(f"  Server response: {response.status_code} - {response.text.strip()}")
+    assert response.status_code == 200, f"Upload failed: {response.text}"
+
+    # Step 7: Verify reload
+    print("Step 7: Verifying reload succeeded...")
+    dut.expect("Reload complete", timeout=30)
+    print("  Reload complete message received!")
+
+    # Verify no crash occurred
+    dut.expect("Main loop running", timeout=15)
+    print("  Main loop still running - no crash!")
+
+    print("\n=== Hot Reload E2E Test on Hardware PASSED ===\n")
+
+
+@pytest.mark.host_test
+@pytest.mark.parametrize("embedded_services", ["idf"], indirect=True)
+def test_idf_reload_command_hardware(dut, original_code):
+    """
+    Test the idf.py reload command on real hardware.
+
+    Similar to the QEMU version but discovers the device IP from serial output.
+    """
+    print("\n=== Testing idf.py reload Command on Hardware ===\n")
+
+    # Step 0: Wait for Unity menu and select the integration test
+    print("Step 0: Selecting integration test from Unity menu...")
+    dut.expect_exact("Press ENTER to see the list of tests.", timeout=60)
+    dut.write('"hotreload_integration"')
+    print("  Integration test selected!")
+
+    # Step 1: Wait for initial load
+    print("Step 1: Waiting for initial reloadable function call...")
+    dut.expect(r"Hello.*from initial load", timeout=120)
+    print("  Initial load confirmed!")
+
+    # Step 2: Wait for server to start and get device IP
+    print("Step 2: Waiting for HTTP server to start...")
+    dut.expect("Hotreload server started on port 8080", timeout=60)
+    print("  Server started!")
+
+    device_ip = get_device_ip_from_serial(dut, timeout=5)
+    print(f"  Device IP: {device_ip}")
+    device_url = f"http://{device_ip}:8080"
+
+    # Give the network stack a moment
+    time.sleep(3)
+
+    # Step 3: Verify server is accessible
+    print(f"Step 3: Verifying server is accessible at {device_url}...")
+    for i in range(15):
+        try:
+            response = requests.get(f"{device_url}/status", timeout=5)
+            if response.status_code == 200:
+                print(f"  Server responding at {device_url}")
+                break
+        except requests.exceptions.RequestException:
+            pass
+        print(f"  Attempt {i+1}/15 - waiting...")
+        time.sleep(1)
+    else:
+        pytest.fail(f"Server not accessible at {device_url}")
+
+    # Step 4: Modify reloadable code
+    print("Step 4: Modifying reloadable code (Hello -> Howdy)...")
+    modify_reloadable_code("Howdy")
+    print("  Code modified!")
+
+    # Step 5: Run idf.py reload command
+    print(f"Step 5: Running 'idf.py reload --url {device_url}'...")
+    result = run_idf_reload(device_url)
+
+    print(f"  Return code: {result.returncode}")
+    if result.stdout:
+        print(f"  stdout:\n{result.stdout}")
+    if result.stderr:
+        print(f"  stderr:\n{result.stderr}")
+
+    assert result.returncode == 0, f"idf.py reload failed: {result.stderr}"
+    assert "Reload successful!" in result.stdout, "Expected success message not found"
+    print("  idf.py reload completed successfully!")
+
+    # Step 6: Verify reload on device
+    print("Step 6: Verifying reload succeeded on device...")
+    dut.expect("Reload complete", timeout=30)
+    print("  Reload complete message received!")
+
+    # Verify no crash
+    dut.expect("Main loop running", timeout=15)
+    print("  Main loop still running - no crash!")
+
+    print("\n=== idf.py reload Command Test on Hardware PASSED ===\n")
+
+
 if __name__ == "__main__":
-    print("Run with:")
+    print("=" * 70)
+    print("Hot Reload Test Suite")
+    print("=" * 70)
+    print()
+    print("== QEMU Tests ==")
     print("  Unit tests:     pytest test_hotreload.py::test_hotreload_unit_tests -v -s --embedded-services idf,qemu")
     print("  E2E test:       pytest test_hotreload.py::test_hot_reload_e2e -v -s --embedded-services idf,qemu")
     print("  Reload cmd:     pytest test_hotreload.py::test_idf_reload_command -v -s --embedded-services idf,qemu")
     print("  Watch + qemu:   pytest test_hotreload.py::test_idf_watch_with_qemu -v -s")
-    print("  Via idf.py:     idf.py run-project --qemu")
+    print()
+    print("== Hardware Tests ==")
+    print("  Unit tests:     pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX")
+    print("  E2E test:       pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX")
+    print("  Reload cmd:     pytest test_hotreload.py::test_idf_reload_command_hardware -v -s --embedded-services idf --port /dev/cu.usbserial-XXX")
+    print()
+    print("== Using CMake Presets ==")
+    print("  Build QEMU:     idf.py --preset esp32-qemu build")
+    print("  Build hardware: idf.py --preset esp32-hardware build flash --port /dev/cu.usbserial-XXX")
+    print("  Run QEMU:       idf.py --preset esp32-qemu run-project --qemu")

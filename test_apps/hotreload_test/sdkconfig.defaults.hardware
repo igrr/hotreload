@@ -1,0 +1,14 @@
+# Hardware-specific configuration
+# This file is applied when building for real ESP32 hardware
+
+# Network configuration for real hardware (internal EMAC or WiFi)
+CONFIG_EXAMPLE_CONNECT_ETHERNET=y
+CONFIG_ETH_USE_ESP32_EMAC=y
+CONFIG_ETHERNET_INTERNAL_SUPPORT=y
+
+# Disable OpenETH (QEMU-only)
+CONFIG_ETH_USE_OPENETH=n
+
+# WiFi can be enabled if Ethernet is not available
+# CONFIG_EXAMPLE_CONNECT_WIFI=y
+# CONFIG_EXAMPLE_CONNECT_ETHERNET=n

@@ -1,17 +1,10 @@
+# Common configuration for all builds
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_LIBC_NEWLIB=y
 
 # Required for agent_dev_utils coredump analysis
 CONFIG_ESP_COREDUMP_ENABLE_TO_UART=y
 CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
-
-# Network configuration for QEMU (openeth only)
-CONFIG_EXAMPLE_CONNECT_WIFI=n
-CONFIG_EXAMPLE_CONNECT_ETHERNET=y
-CONFIG_ETH_USE_OPENETH=y
-CONFIG_ETHERNET_OPENETH_SUPPORT=y
-# Disable internal EMAC and other Ethernet drivers (not supported in QEMU)
-CONFIG_ETHERNET_INTERNAL_SUPPORT=n
 
 # Disable task watchdog (unity_run_menu blocks on UART input)
 CONFIG_ESP_TASK_WDT_INIT=n
