@@ -3,6 +3,29 @@
 import argparse
 import subprocess
 
+
+def write_if_changed(filepath: str, content: str) -> bool:
+    """
+    Write content to file only if it differs from existing content.
+
+    This avoids unnecessary timestamp updates that would trigger
+    downstream rebuilds when the actual content hasn't changed.
+
+    Returns True if the file was written, False if unchanged.
+    """
+    try:
+        with open(filepath, 'r') as f:
+            existing = f.read()
+        if existing == content:
+            return False
+    except FileNotFoundError:
+        pass
+
+    with open(filepath, 'w') as f:
+        f.write(content)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--main-elf', type=str, help='The main ELF file', required=True)
@@ -47,9 +70,13 @@ def main():
             undef_symbols.remove(symbol_name)
 
 
-    with open(args.output_ld_script, 'w') as f:
-        for symbol in def_symbols:
-            f.write(f'{symbol[0]} = 0x{symbol[1]};\n')
+    # Generate linker script content
+    ld_script_content = ''
+    for symbol in def_symbols:
+        ld_script_content += f'{symbol[0]} = 0x{symbol[1]};\n'
+
+    # Write only if content changed (avoids unnecessary rebuilds)
+    write_if_changed(args.output_ld_script, ld_script_content)
 
     if len(undef_symbols) > 0:
         print(f'WARNING: {len(undef_symbols)} symbols are not found in the main ELF file: {undef_symbols}')

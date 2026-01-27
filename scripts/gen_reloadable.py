@@ -4,6 +4,30 @@ import argparse
 import os
 import sys
 import subprocess
+from io import StringIO
+
+
+def write_if_changed(filepath: str, content: str) -> bool:
+    """
+    Write content to file only if it differs from existing content.
+
+    This avoids unnecessary timestamp updates that would trigger
+    downstream rebuilds when the actual content hasn't changed.
+
+    Returns True if the file was written, False if unchanged.
+    """
+    try:
+        with open(filepath, 'r') as f:
+            existing = f.read()
+        if existing == content:
+            return False
+    except FileNotFoundError:
+        pass
+
+    with open(filepath, 'w') as f:
+        f.write(content)
+    return True
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -35,7 +59,8 @@ def main():
 
     symbol_list = []
 
-    output_stubs = open(args.output_stubs, 'w')
+    # Generate stubs content in memory first
+    stubs_buffer = StringIO()
 
     # parse the output of nm
     def_symbols_lines = nm_def_output.splitlines()
@@ -50,13 +75,15 @@ def main():
         if symbol_type == 'T':
             symbol_list.append(symbol_name)
             symbol_index = len(symbol_list) - 1
-            generate_function_wrapper(table_name, symbol_name, symbol_index, output_stubs)
+            generate_function_wrapper(table_name, symbol_name, symbol_index, stubs_buffer)
         elif symbol_type == 'D' or symbol_type == 'B':
             print(f'WARNING: {symbol_name} in {args.input_elf} is a data symbol, will not be available in the main program')
 
+    # Write stubs file only if content changed
+    write_if_changed(args.output_stubs, stubs_buffer.getvalue())
 
-    with open(args.output_symbol_table, 'w') as f:
-        f.write(f'''#include <stdint.h>
+    # Generate symbol table content
+    symbol_table_content = f'''#include <stdint.h>
 #include <stddef.h>
 
 // Symbol table - populated by hotreload_load()
@@ -64,23 +91,29 @@ uint32_t {table_name}[{len(symbol_list)}];
 
 // Symbol names list for the loader to populate the table
 const char *const hotreload_symbol_names[] = {{
-''')
-        for symbol_name in symbol_list:
-            f.write(f'    "{symbol_name}",\n')
-        f.write(f'''    NULL  // Sentinel
+'''
+    for symbol_name in symbol_list:
+        symbol_table_content += f'    "{symbol_name}",\n'
+    symbol_table_content += f'''    NULL  // Sentinel
 }};
 
 // Number of symbols in the table
 const size_t hotreload_symbol_count = {len(symbol_list)};
-''')
+'''
 
+    # Write symbol table file only if content changed
+    write_if_changed(args.output_symbol_table, symbol_table_content)
 
+    # Generate undefined symbols RSP content
     undef_symbols_lines = nm_undef_output.splitlines()
-    with open(args.output_undefined_symbols_rsp_file, 'w') as f:
-        for line in undef_symbols_lines:
-            parts = line.split()
-            symbol_name = parts[0]
-            f.write(f'-Wl,--undefined={symbol_name}\n')
+    rsp_content = ''
+    for line in undef_symbols_lines:
+        parts = line.split()
+        symbol_name = parts[0]
+        rsp_content += f'-Wl,--undefined={symbol_name}\n'
+
+    # Write RSP file only if content changed
+    write_if_changed(args.output_undefined_symbols_rsp_file, rsp_content)
 
 
 def generate_function_wrapper_xtensa(table_name, symbol_name, symbol_index, output_file):
