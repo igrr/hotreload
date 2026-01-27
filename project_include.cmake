@@ -108,6 +108,12 @@ function(hotreload_setup)
         "-fPIC"
         "${ld_script_path}"
     )
+    # LINK_DEPENDS tells CMake to re-link when the linker script changes.
+    # This ensures the final ELF is rebuilt when the main application changes
+    # (which triggers linker script regeneration with updated symbol addresses).
+    set_target_properties(${elf_final_target} PROPERTIES
+        LINK_DEPENDS "${ld_script_path}"
+    )
     add_dependencies(${elf_final_target} gen_${COMPONENT_NAME}_ld_script)
 
     # Strip the ELF
