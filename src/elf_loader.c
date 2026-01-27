@@ -267,10 +267,15 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
     }
 
     // Try allocating with EXEC capability first (IRAM - faster code execution)
-    // Use 4-byte alignment (word-aligned for Xtensa)
-    void *ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
+    // Use 4-byte alignment (word-aligned for Xtensa/RISC-V)
+    // Note: MALLOC_CAP_EXEC is not available on all targets (e.g., ESP32-P4 with
+    // memory protection enabled)
+    void *ram = NULL;
+#ifdef MALLOC_CAP_EXEC
+    ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
+#endif
     if (ram == NULL) {
-        // Fall back to regular 32-bit memory (DRAM - still executable on ESP32)
+        // Fall back to regular 32-bit memory (DRAM - still executable on some targets)
         ESP_LOGW(TAG, "EXEC memory not available, falling back to DRAM");
         ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_32BIT);
     }

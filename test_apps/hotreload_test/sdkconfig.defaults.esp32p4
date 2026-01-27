@@ -3,3 +3,6 @@
 
 # Console via USB-Serial/JTAG (common for ESP32-P4 dev boards)
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Support older chip revisions (v1.0 dev boards)
+CONFIG_ESP32P4_REV_MIN_0=y
