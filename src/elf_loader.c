@@ -17,29 +17,25 @@
 static const char *TAG = "elf_loader";
 
 /**
- * ESP32-S3 PSRAM Address Translation
+ * PSRAM Address Translation for Dynamic Code Loading
  *
- * On ESP32-S3, MEMPROT (Memory Protection) enforces W^X (Write XOR Execute)
- * policy by default, preventing code execution from dynamically allocated
- * internal RAM. PSRAM is not subject to MEMPROT, making it suitable for
- * dynamic code loading.
+ * On chips with MEMPROT (Memory Protection) that enforces W^X (Write XOR Execute),
+ * internal RAM cannot be used for dynamic code loading. PSRAM provides an
+ * alternative that is not subject to MEMPROT restrictions.
  *
- * PSRAM is accessible through two different address ranges:
+ * ESP32-S3:
+ * ---------
+ * PSRAM is accessible through two address ranges with a fixed offset:
  * - Data bus (DROM): 0x3C000000 - 0x3E000000 (for read/write access)
  * - Instruction bus (IROM): 0x42000000 - 0x44000000 (for code execution)
+ * Simple address translation: IROM_addr = DROM_addr + 0x6000000
  *
- * Both ranges map to the same physical PSRAM memory. When loading executable
- * code into PSRAM, we must:
- * 1. Write code via the data address (DROM range)
- * 2. Execute code via the instruction address (IROM range)
- *
- * The offset between IROM and DROM is: 0x42000000 - 0x3C000000 = 0x6000000
- *
- * Note: ESP32-S2 does NOT support this approach. On ESP32-S2:
- * - PSRAM XIP requires CONFIG_SPIRAM_FETCH_INSTRUCTIONS at build time
- * - The cache MMU mapping is configured at startup, not runtime
- * - Dynamic code loading to PSRAM is not supported via simple address offset
- * - Use internal DRAM with D/IRAM overlap instead (like original ESP32)
+ * ESP32-S2:
+ * ---------
+ * PSRAM data is at 0x3F500000-0x3FF80000, but instruction cache requires
+ * explicit MMU configuration. We find free MMU entries and map PSRAM there.
+ * The instruction address is calculated dynamically based on which MMU
+ * entries are allocated.
  */
 #if CONFIG_IDF_TARGET_ESP32S3
 #define PSRAM_DROM_LOW   SOC_DROM_LOW      // 0x3C000000
@@ -54,6 +50,138 @@ static const char *TAG = "elf_loader";
 #define PSRAM_DROM_TO_IROM(addr) \
     ((uintptr_t)(addr) + PSRAM_ID_OFFSET)
 #endif
+
+#if CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
+#include "esp_attr.h"
+#include "esp32s2/rom/cache.h"
+#include "soc/mmu.h"
+#include "soc/extmem_reg.h"
+
+// ESP32-S2 PSRAM starts at this address (IDF 5.x)
+#define ESP32S2_PSRAM_VADDR_START   0x3f800000
+
+// MMU configuration
+#define ESP32S2_MMU_INVALID         BIT(14)
+#define ESP32S2_MMU_UNIT_SIZE       0x10000  // 64KB per MMU entry
+#define ESP32S2_MMU_REG             ((volatile uint32_t *)DR_REG_MMU_TABLE)
+
+// Instruction cache address space
+#define ESP32S2_MMU_IBUS_BASE       SOC_IRAM0_ADDRESS_LOW
+#define ESP32S2_MMU_IBUS_MAX        ((SOC_IRAM0_ADDRESS_HIGH - SOC_IRAM0_ADDRESS_LOW) / ESP32S2_MMU_UNIT_SIZE)
+#define ESP32S2_MMU_IBUS_START_OFF  8  // First 8 entries reserved for IDF
+
+// Address conversion macros
+#define ESP32S2_PSRAM_OFF(v)        ((v) - ESP32S2_PSRAM_VADDR_START)
+#define ESP32S2_PSRAM_SECS(v)       (ESP32S2_PSRAM_OFF((uintptr_t)(v)) / ESP32S2_MMU_UNIT_SIZE)
+#define ESP32S2_PSRAM_ALIGN(v)      ((uintptr_t)(v) & (~(ESP32S2_MMU_UNIT_SIZE - 1)))
+#define ESP32S2_ICACHE_ADDR(s)      (ESP32S2_MMU_IBUS_BASE + (s) * ESP32S2_MMU_UNIT_SIZE)
+
+// Check if address is in ESP32-S2 PSRAM data range
+#define IS_ESP32S2_PSRAM_ADDR(addr) \
+    ((uintptr_t)(addr) >= ESP32S2_PSRAM_VADDR_START && (uintptr_t)(addr) < 0x3FF80000)
+
+// External functions for cache/interrupt management
+extern void spi_flash_disable_interrupts_caches_and_other_cpu(void);
+extern void spi_flash_enable_interrupts_caches_and_other_cpu(void);
+
+/**
+ * @brief Initialize MMU mapping for PSRAM code execution on ESP32-S2
+ *
+ * Finds free MMU entries in the instruction cache address space and maps
+ * them to the PSRAM region where code is loaded.
+ *
+ * @param ctx ELF loader context with ram_base pointing to PSRAM
+ * @return ESP_OK on success, error code on failure
+ */
+static esp_err_t IRAM_ATTR esp32s2_init_mmu(elf_loader_ctx_t *ctx)
+{
+    if (!IS_ESP32S2_PSRAM_ADDR(ctx->ram_base)) {
+        ESP_LOGD(TAG, "RAM not in PSRAM range, MMU setup not needed");
+        return ESP_OK;
+    }
+
+    // Calculate how many MMU entries we need
+    uint32_t ibus_secs = ctx->ram_size / ESP32S2_MMU_UNIT_SIZE;
+    if (ctx->ram_size % ESP32S2_MMU_UNIT_SIZE) {
+        ibus_secs++;
+    }
+
+    // Get PSRAM section number for the data address
+    uint32_t dbus_secs = ESP32S2_PSRAM_SECS(ctx->ram_base);
+
+    volatile uint32_t *mmu = ESP32S2_MMU_REG;
+    int off = -1;
+
+    // Disable interrupts and caches during MMU manipulation
+    spi_flash_disable_interrupts_caches_and_other_cpu();
+
+    // Find consecutive free MMU entries
+    for (int i = ESP32S2_MMU_IBUS_START_OFF; i < ESP32S2_MMU_IBUS_MAX; i++) {
+        if (mmu[i] == ESP32S2_MMU_INVALID) {
+            int j;
+            for (j = 1; j < ibus_secs; j++) {
+                if (i + j >= ESP32S2_MMU_IBUS_MAX || mmu[i + j] != ESP32S2_MMU_INVALID) {
+                    break;
+                }
+            }
+            if (j >= ibus_secs) {
+                // Found enough consecutive entries, map them
+                for (int k = 0; k < ibus_secs; k++) {
+                    mmu[i + k] = SOC_MMU_ACCESS_SPIRAM | (dbus_secs + k);
+                }
+                off = i;
+                break;
+            }
+        }
+    }
+
+    spi_flash_enable_interrupts_caches_and_other_cpu();
+
+    if (off < 0) {
+        ESP_LOGE(TAG, "Failed to find %lu consecutive free MMU entries", (unsigned long)ibus_secs);
+        return ESP_ERR_NO_MEM;
+    }
+
+    ctx->mmu_off = off;
+    ctx->mmu_num = ibus_secs;
+    ctx->text_off = ESP32S2_ICACHE_ADDR(off) - ESP32S2_PSRAM_ALIGN(ctx->ram_base);
+
+    ESP_LOGI(TAG, "ESP32-S2 MMU: mapped %lu entries at offset %d, text_off=0x%lx",
+             (unsigned long)ibus_secs, off, (unsigned long)ctx->text_off);
+
+    return ESP_OK;
+}
+
+/**
+ * @brief Deinitialize MMU mapping for ESP32-S2
+ *
+ * Marks the MMU entries as invalid, freeing them for other use.
+ *
+ * @param ctx ELF loader context
+ */
+static void IRAM_ATTR esp32s2_deinit_mmu(elf_loader_ctx_t *ctx)
+{
+    if (ctx->mmu_num == 0) {
+        return;  // No MMU entries to free
+    }
+
+    volatile uint32_t *mmu = ESP32S2_MMU_REG;
+
+    spi_flash_disable_interrupts_caches_and_other_cpu();
+
+    for (int i = 0; i < ctx->mmu_num; i++) {
+        mmu[ctx->mmu_off + i] = ESP32S2_MMU_INVALID;
+    }
+
+    spi_flash_enable_interrupts_caches_and_other_cpu();
+
+    ESP_LOGD(TAG, "ESP32-S2 MMU: freed %d entries at offset %d", ctx->mmu_num, ctx->mmu_off);
+
+    ctx->mmu_off = 0;
+    ctx->mmu_num = 0;
+    ctx->text_off = 0;
+}
+#endif // CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
 
 // Minimum size for a valid ELF header
 #define ELF_HEADER_MIN_SIZE sizeof(Elf32_Ehdr)
@@ -325,16 +453,19 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
         ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
 #endif
 
-#if CONFIG_IDF_TARGET_ESP32S3 && CONFIG_SPIRAM
-        // On ESP32-S3, MEMPROT (Memory Protection) enforces W^X policy by default,
+#if (CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32S2) && CONFIG_SPIRAM
+        // On ESP32-S3 and ESP32-S2, MEMPROT (Memory Protection) enforces W^X policy,
         // preventing code execution from dynamically allocated internal RAM.
         // PSRAM is not subject to MEMPROT, so we use it for dynamic code loading.
-        // Code is written via DROM bus and executed via IROM bus.
         //
-        // Note: ESP32-S2 does NOT support PSRAM code execution via address translation.
-        // On S2, PSRAM XIP requires compile-time CONFIG_SPIRAM_FETCH_INSTRUCTIONS.
+        // ESP32-S3: Code is written via DROM bus and executed via IROM bus (fixed offset).
+        // ESP32-S2: Requires explicit MMU mapping (done after allocation).
         if (ram == NULL) {
+#if CONFIG_IDF_TARGET_ESP32S3
             ESP_LOGI(TAG, "Using SPIRAM for code loading on ESP32-S3");
+#else
+            ESP_LOGI(TAG, "Using SPIRAM for code loading on ESP32-S2");
+#endif
             ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         }
 #endif
@@ -354,6 +485,16 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
     ctx->ram_base = ram;
 
     ESP_LOGI(TAG, "Allocated %zu bytes at %p for ELF loading", ctx->ram_size, ram);
+
+#if CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
+    // On ESP32-S2, if allocated from PSRAM, set up MMU mapping for code execution
+    esp_err_t mmu_err = esp32s2_init_mmu(ctx);
+    if (mmu_err != ESP_OK) {
+        heap_caps_free(ram);
+        ctx->ram_base = NULL;
+        return mmu_err;
+    }
+#endif
 
     return ESP_OK;
 }
@@ -1098,8 +1239,19 @@ void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
             // Internal DRAM is directly executable on Xtensa
             ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, (void *)dram_addr, sym_value);
             return (void *)dram_addr;
+#elif CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
+            // On ESP32-S2, check if address is in PSRAM and MMU is configured
+            if (IS_ESP32S2_PSRAM_ADDR(dram_addr) && ctx->text_off != 0) {
+                uintptr_t irom_addr = dram_addr + ctx->text_off;
+                ESP_LOGD(TAG, "Symbol '%s': PSRAM=%p -> ICACHE=%p (text_off=0x%lx)",
+                         name, (void *)dram_addr, (void *)irom_addr, (unsigned long)ctx->text_off);
+                return (void *)irom_addr;
+            }
+            // Internal DRAM is directly executable on Xtensa
+            ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, (void *)dram_addr, sym_value);
+            return (void *)dram_addr;
 #else
-            // On other Xtensa targets (ESP32, ESP32-S2), internal DRAM is executable
+            // On other Xtensa targets (ESP32), internal DRAM is executable
             ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, (void *)dram_addr, sym_value);
             return (void *)dram_addr;
 #endif
@@ -1115,6 +1267,11 @@ void elf_loader_cleanup(elf_loader_ctx_t *ctx)
     if (ctx == NULL) {
         return;
     }
+
+#if CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
+    // On ESP32-S2, clean up MMU mapping before freeing RAM
+    esp32s2_deinit_mmu(ctx);
+#endif
 
     // Free allocated RAM
     if (ctx->ram_base) {

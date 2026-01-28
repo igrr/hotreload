@@ -1,0 +1,16 @@
+# ESP32-S2 specific configuration for dynamic code loading from PSRAM
+
+# Use UART for console (board with external USB-to-UART bridge on GPIO 43/44)
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Enable PSRAM (SPIRAM) support
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# Allow allocation from PSRAM
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+
+# Increase main task stack for test framework
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

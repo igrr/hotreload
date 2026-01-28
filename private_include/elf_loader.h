@@ -28,6 +28,11 @@ typedef struct {
     const void *elf_data;     /**< Pointer to ELF data in flash */
     size_t elf_size;          /**< Size of ELF data */
     uint32_t heap_caps;       /**< Memory capabilities for allocation (0 = default) */
+#if CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
+    int mmu_off;              /**< MMU table entry offset for PSRAM mapping */
+    int mmu_num;              /**< Number of MMU entries used */
+    uintptr_t text_off;       /**< Offset from PSRAM data addr to instruction addr */
+#endif
 } elf_loader_ctx_t;
 
 /**

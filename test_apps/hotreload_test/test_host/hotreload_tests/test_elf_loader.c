@@ -914,7 +914,8 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_init", "[elf_loader][symbol]")
     // Symbol should point within the loaded code region
     // - On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
     // - On ESP32-S3 with PSRAM, symbols are returned as IROM addresses (DROM + 0x6000000)
-    // - On other Xtensa (ESP32, S2), symbols are DRAM addresses (which are also executable)
+    // - On ESP32-S2 with PSRAM, symbols are in instruction cache space (via MMU mapping)
+    // - On other Xtensa (ESP32), symbols are DRAM addresses (which are also executable)
     uintptr_t expected_base = (uintptr_t)ctx.ram_base;
     uintptr_t expected_end = expected_base + ctx.ram_size;
 
@@ -928,6 +929,14 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_init", "[elf_loader][symbol]")
     if ((uintptr_t)ctx.ram_base >= 0x3C000000 && (uintptr_t)ctx.ram_base < 0x3E000000) {
         expected_base += (0x42000000 - 0x3C000000);  // PSRAM I/D offset
         expected_end += (0x42000000 - 0x3C000000);
+    }
+#elif CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
+    // ESP32-S2 with PSRAM: check if ram_base is in PSRAM range (0x3f800000-0x3ff80000)
+    // If so, symbols are returned as instruction cache addresses (via dynamic MMU mapping)
+    // The ICACHE range is 0x40020000-0x40070000
+    if ((uintptr_t)ctx.ram_base >= 0x3f800000 && (uintptr_t)ctx.ram_base < 0x3ff80000) {
+        expected_base = 0x40020000;  // SOC_IRAM0_ADDRESS_LOW
+        expected_end = 0x40070000;   // SOC_IRAM0_ADDRESS_HIGH
     }
 #endif
     TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
@@ -972,6 +981,7 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_hello", "[elf_loader][symbol]"
     // Symbol should point within the loaded code region
     // - On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
     // - On ESP32-S3 with PSRAM, symbols are returned as IROM addresses
+    // - On ESP32-S2 with PSRAM, symbols are in instruction cache space (via MMU mapping)
     // - On other Xtensa, symbols are DRAM addresses
     uintptr_t expected_base = (uintptr_t)ctx.ram_base;
     uintptr_t expected_end = expected_base + ctx.ram_size;
@@ -983,6 +993,12 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_hello", "[elf_loader][symbol]"
     if ((uintptr_t)ctx.ram_base >= 0x3C000000 && (uintptr_t)ctx.ram_base < 0x3E000000) {
         expected_base += (0x42000000 - 0x3C000000);
         expected_end += (0x42000000 - 0x3C000000);
+    }
+#elif CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
+    // ESP32-S2 with PSRAM: symbols are in instruction cache space
+    if ((uintptr_t)ctx.ram_base >= 0x3f800000 && (uintptr_t)ctx.ram_base < 0x3ff80000) {
+        expected_base = 0x40020000;  // SOC_IRAM0_ADDRESS_LOW
+        expected_end = 0x40070000;   // SOC_IRAM0_ADDRESS_HIGH
     }
 #endif
     TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
