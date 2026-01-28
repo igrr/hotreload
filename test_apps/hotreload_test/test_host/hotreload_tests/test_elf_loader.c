@@ -933,10 +933,10 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_init", "[elf_loader][symbol]")
 #elif CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
     // ESP32-S2 with PSRAM: check if ram_base is in PSRAM range (0x3f800000-0x3ff80000)
     // If so, symbols are returned as instruction cache addresses (via dynamic MMU mapping)
-    // The ICACHE range is 0x40020000-0x40070000
+    // The external memory ICACHE range is 0x40080000-0x40800000
     if ((uintptr_t)ctx.ram_base >= 0x3f800000 && (uintptr_t)ctx.ram_base < 0x3ff80000) {
-        expected_base = 0x40020000;  // SOC_IRAM0_ADDRESS_LOW
-        expected_end = 0x40070000;   // SOC_IRAM0_ADDRESS_HIGH
+        expected_base = 0x40080000;  // External memory instruction cache start
+        expected_end = 0x40800000;   // External memory instruction cache end
     }
 #endif
     TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
@@ -995,10 +995,10 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_hello", "[elf_loader][symbol]"
         expected_end += (0x42000000 - 0x3C000000);
     }
 #elif CONFIG_IDF_TARGET_ESP32S2 && CONFIG_SPIRAM
-    // ESP32-S2 with PSRAM: symbols are in instruction cache space
+    // ESP32-S2 with PSRAM: symbols are in external memory instruction cache space
     if ((uintptr_t)ctx.ram_base >= 0x3f800000 && (uintptr_t)ctx.ram_base < 0x3ff80000) {
-        expected_base = 0x40020000;  // SOC_IRAM0_ADDRESS_LOW
-        expected_end = 0x40070000;   // SOC_IRAM0_ADDRESS_HIGH
+        expected_base = 0x40080000;  // External memory instruction cache start
+        expected_end = 0x40800000;   // External memory instruction cache end
     }
 #endif
     TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
