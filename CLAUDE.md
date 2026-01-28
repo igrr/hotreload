@@ -2,9 +2,7 @@
 
 ## Project Overview
 
-This is an ESP32 hot reload system that allows loading and reloading ELF libraries at runtime. The core ELF loader is implemented and supports both **Xtensa** (ESP32, ESP32-S3) and **RISC-V** (ESP32-C3, ESP32-C6) architectures.
-
-> **Note**: ESP32-S2 is NOT supported. Its memory protection (MEMPROT) prevents code execution from dynamically allocated memory (both internal DRAM and PSRAM), making runtime code loading impossible.
+This is an ESP32 hot reload system that allows loading and reloading ELF libraries at runtime. The core ELF loader is implemented and supports both **Xtensa** (ESP32, ESP32-S2, ESP32-S3) and **RISC-V** (ESP32-C3, ESP32-C6) architectures.
 
 **Key Documents:**
 - `DESIGN.md` - Overall system architecture

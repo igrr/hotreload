@@ -9,15 +9,13 @@ Runtime hot reload for ESP chips - load and reload ELF modules without reflashin
 - **CMake Integration**: Simple `hotreload_setup()` function handles all build complexity
 - **Pre/Post Hooks**: Save and restore application state during reloads
 - **Architecture Support**:
-  - **Xtensa** (ESP32, ESP32-S3): R_XTENSA_RELATIVE, R_XTENSA_32, R_XTENSA_JMP_SLOT, R_XTENSA_PLT
+  - **Xtensa** (ESP32, ESP32-S2, ESP32-S3): R_XTENSA_RELATIVE, R_XTENSA_32, R_XTENSA_JMP_SLOT, R_XTENSA_PLT
   - **RISC-V** (ESP32-C3, ESP32-C6, ESP32-H2): R_RISCV_RELATIVE, R_RISCV_32, R_RISCV_JUMP_SLOT, R_RISCV_PCREL_HI20/LO12
 
 ## Requirements
 
 - ESP-IDF v5.0 or later
-- Supported targets: ESP32, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2
-
-> **Note**: ESP32-S2 is not supported. Its memory protection (MEMPROT) prevents code execution from dynamically allocated memory, making runtime code loading impossible.
+- Supported targets: ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2
 
 ## Installation
 
