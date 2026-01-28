@@ -55,6 +55,39 @@
                 "SDKCONFIG": "${sourceDir}/build/esp32p4-hardware/sdkconfig",
                 "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32p4;${sourceDir}/sdkconfig.defaults.hardware"
             }
+        },
+        {
+            "name": "esp32s3-qemu",
+            "displayName": "ESP32-S3 QEMU",
+            "description": "ESP32-S3 build optimized for QEMU testing",
+            "binaryDir": "build/esp32s3-qemu",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32s3",
+                "SDKCONFIG": "${sourceDir}/build/esp32s3-qemu/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s3;${sourceDir}/sdkconfig.defaults.qemu"
+            }
+        },
+        {
+            "name": "esp32s2-hardware",
+            "displayName": "ESP32-S2 Hardware",
+            "description": "ESP32-S2 build for real hardware testing with PSRAM",
+            "binaryDir": "build/esp32s2-hardware",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32s2",
+                "SDKCONFIG": "${sourceDir}/build/esp32s2-hardware/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s2;${sourceDir}/sdkconfig.defaults.hardware"
+            }
+        },
+        {
+            "name": "esp32s3-hardware",
+            "displayName": "ESP32-S3 Hardware",
+            "description": "ESP32-S3 build for real hardware testing with PSRAM",
+            "binaryDir": "build/esp32s3-hardware",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32s3",
+                "SDKCONFIG": "${sourceDir}/build/esp32s3-hardware/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s3;${sourceDir}/sdkconfig.defaults.hardware"
+            }
         }
     ]
 }

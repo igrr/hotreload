@@ -33,7 +33,7 @@ static void *s_post_hook_ctx = NULL;
 esp_err_t hotreload_unload(void);
 
 // Helper function to perform ELF loading steps
-static esp_err_t do_elf_load(const void *elf_data, size_t elf_size)
+static esp_err_t do_elf_load(const void *elf_data, size_t elf_size, uint32_t heap_caps)
 {
     esp_err_t err;
 
@@ -43,6 +43,9 @@ static esp_err_t do_elf_load(const void *elf_data, size_t elf_size)
         ESP_LOGE(TAG, "Failed to init ELF loader: %d", err);
         return err;
     }
+
+    // Set custom heap_caps if specified
+    s_loader_ctx.heap_caps = heap_caps;
 
     // Calculate memory layout
     err = elf_loader_calculate_memory_layout(&s_loader_ctx, NULL, NULL);
@@ -137,7 +140,7 @@ esp_err_t hotreload_load(const hotreload_config_t *config)
     }
 
     // Perform ELF loading
-    err = do_elf_load(mmap_ptr, partition->size);
+    err = do_elf_load(mmap_ptr, partition->size, config->heap_caps);
     if (err != ESP_OK) {
         esp_partition_munmap(s_mmap_handle);
         s_mmap_handle = 0;
@@ -185,7 +188,7 @@ esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size)
         hotreload_unload();
     }
 
-    esp_err_t err = do_elf_load(elf_data, elf_size);
+    esp_err_t err = do_elf_load(elf_data, elf_size, 0);  // Default heap_caps
     if (err != ESP_OK) {
         return err;
     }

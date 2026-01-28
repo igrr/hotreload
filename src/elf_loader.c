@@ -16,6 +16,45 @@
 
 static const char *TAG = "elf_loader";
 
+/**
+ * ESP32-S3 PSRAM Address Translation
+ *
+ * On ESP32-S3, MEMPROT (Memory Protection) enforces W^X (Write XOR Execute)
+ * policy by default, preventing code execution from dynamically allocated
+ * internal RAM. PSRAM is not subject to MEMPROT, making it suitable for
+ * dynamic code loading.
+ *
+ * PSRAM is accessible through two different address ranges:
+ * - Data bus (DROM): 0x3C000000 - 0x3E000000 (for read/write access)
+ * - Instruction bus (IROM): 0x42000000 - 0x44000000 (for code execution)
+ *
+ * Both ranges map to the same physical PSRAM memory. When loading executable
+ * code into PSRAM, we must:
+ * 1. Write code via the data address (DROM range)
+ * 2. Execute code via the instruction address (IROM range)
+ *
+ * The offset between IROM and DROM is: 0x42000000 - 0x3C000000 = 0x6000000
+ *
+ * Note: ESP32-S2 does NOT support this approach. On ESP32-S2:
+ * - PSRAM XIP requires CONFIG_SPIRAM_FETCH_INSTRUCTIONS at build time
+ * - The cache MMU mapping is configured at startup, not runtime
+ * - Dynamic code loading to PSRAM is not supported via simple address offset
+ * - Use internal DRAM with D/IRAM overlap instead (like original ESP32)
+ */
+#if CONFIG_IDF_TARGET_ESP32S3
+#define PSRAM_DROM_LOW   SOC_DROM_LOW      // 0x3C000000
+#define PSRAM_DROM_HIGH  SOC_DROM_HIGH     // 0x3E000000
+#define PSRAM_ID_OFFSET  (SOC_IROM_LOW - SOC_DROM_LOW)  // 0x6000000
+
+// Check if address is in PSRAM data range
+#define IS_PSRAM_DROM_ADDR(addr) \
+    ((uintptr_t)(addr) >= PSRAM_DROM_LOW && (uintptr_t)(addr) < PSRAM_DROM_HIGH)
+
+// Convert PSRAM data address to instruction address
+#define PSRAM_DROM_TO_IROM(addr) \
+    ((uintptr_t)(addr) + PSRAM_ID_OFFSET)
+#endif
+
 // Minimum size for a valid ELF header
 #define ELF_HEADER_MIN_SIZE sizeof(Elf32_Ehdr)
 
@@ -266,23 +305,50 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Try allocating with EXEC capability first (IRAM - faster code execution)
-    // Use 4-byte alignment (word-aligned for Xtensa/RISC-V)
-    // Note: MALLOC_CAP_EXEC is not available on all targets (e.g., ESP32-P4 with
-    // memory protection enabled)
     void *ram = NULL;
-#ifdef MALLOC_CAP_EXEC
-    ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
-#endif
-    if (ram == NULL) {
-        // Fall back to regular 32-bit memory (DRAM - still executable on some targets)
-        ESP_LOGW(TAG, "EXEC memory not available, falling back to DRAM");
-        ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_32BIT);
-    }
 
-    if (ram == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate %zu bytes for ELF", ctx->ram_size);
-        return ESP_ERR_NO_MEM;
+    // If custom heap_caps specified, use those directly
+    if (ctx->heap_caps != 0) {
+        ESP_LOGI(TAG, "Allocating with custom heap_caps: 0x%lx", (unsigned long)ctx->heap_caps);
+        ram = heap_caps_aligned_alloc(4, ctx->ram_size, ctx->heap_caps);
+        if (ram == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate %zu bytes with caps 0x%lx",
+                     ctx->ram_size, (unsigned long)ctx->heap_caps);
+            return ESP_ERR_NO_MEM;
+        }
+    } else {
+        // Default allocation: try EXEC first (IRAM - faster code execution)
+        // Use 4-byte alignment (word-aligned for Xtensa/RISC-V)
+        // Note: MALLOC_CAP_EXEC is not available on all targets (e.g., ESP32-P4 with
+        // memory protection enabled, or ESP32-S3 without D/IRAM overlap)
+#ifdef MALLOC_CAP_EXEC
+        ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_EXEC | MALLOC_CAP_8BIT);
+#endif
+
+#if CONFIG_IDF_TARGET_ESP32S3 && CONFIG_SPIRAM
+        // On ESP32-S3, MEMPROT (Memory Protection) enforces W^X policy by default,
+        // preventing code execution from dynamically allocated internal RAM.
+        // PSRAM is not subject to MEMPROT, so we use it for dynamic code loading.
+        // Code is written via DROM bus and executed via IROM bus.
+        //
+        // Note: ESP32-S2 does NOT support PSRAM code execution via address translation.
+        // On S2, PSRAM XIP requires compile-time CONFIG_SPIRAM_FETCH_INSTRUCTIONS.
+        if (ram == NULL) {
+            ESP_LOGI(TAG, "Using SPIRAM for code loading on ESP32-S3");
+            ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+#endif
+
+        if (ram == NULL) {
+            // Fall back to regular 32-bit memory (DRAM - executable on ESP32/S2 with D/IRAM overlap)
+            ESP_LOGW(TAG, "EXEC memory not available, falling back to DRAM");
+            ram = heap_caps_aligned_alloc(4, ctx->ram_size, MALLOC_CAP_32BIT);
+        }
+
+        if (ram == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate %zu bytes for ELF", ctx->ram_size);
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     ctx->ram_base = ram;
@@ -942,13 +1008,19 @@ esp_err_t elf_loader_sync_cache(elf_loader_ctx_t *ctx)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Sync CPU cache to ensure instruction cache sees the loaded code
-    // This is critical for code execution on ESP32
-    esp_err_t err = esp_cache_msync(ctx->ram_base, ctx->ram_size,
-                                     ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    // Sync CPU cache to ensure instruction bus sees the loaded code.
+    // This is critical on all platforms:
+    // - ESP32-S3 with PSRAM: data written via DROM must be visible via IROM
+    // - ESP32-P4: internal memory accessed via L2 cache needs sync
+    // - Other chips: ensures instruction cache coherency
+    //
+    // Use esp_cache_msync for portability - it handles platform differences.
+    // Use UNALIGNED flag since ELF sections may not be cache-line aligned.
+    int flags = ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED;
+    esp_err_t err = esp_cache_msync(ctx->ram_base, ctx->ram_size, flags);
     if (err == ESP_ERR_NOT_SUPPORTED) {
         // Cache sync not supported (e.g., in QEMU or certain ESP32 variants)
-        // On real hardware with IRAM allocation, cache coherency is automatic
+        // On real hardware with direct IRAM allocation, cache coherency may be automatic
         ESP_LOGW(TAG, "Cache sync not supported, assuming cache-coherent memory");
         return ESP_OK;
     }
@@ -1014,8 +1086,20 @@ void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
             ESP_LOGD(TAG, "Symbol '%s': DRAM=%p -> IRAM=%p (value=0x%x)",
                      name, (void *)dram_addr, (void *)iram_addr, sym_value);
             return (void *)iram_addr;
+#elif CONFIG_IDF_TARGET_ESP32S3
+            // On ESP32-S3, check if address is in PSRAM data range
+            // If so, convert to instruction address for code execution
+            if (IS_PSRAM_DROM_ADDR(dram_addr)) {
+                uintptr_t irom_addr = PSRAM_DROM_TO_IROM(dram_addr);
+                ESP_LOGD(TAG, "Symbol '%s': PSRAM DROM=%p -> IROM=%p (value=0x%x)",
+                         name, (void *)dram_addr, (void *)irom_addr, sym_value);
+                return (void *)irom_addr;
+            }
+            // Internal DRAM is directly executable on Xtensa
+            ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, (void *)dram_addr, sym_value);
+            return (void *)dram_addr;
 #else
-            // On Xtensa targets (ESP32, S2, S3), DRAM is executable
+            // On other Xtensa targets (ESP32, ESP32-S2), internal DRAM is executable
             ESP_LOGD(TAG, "Symbol '%s' found at %p (value=0x%x)", name, (void *)dram_addr, sym_value);
             return (void *)dram_addr;
 #endif

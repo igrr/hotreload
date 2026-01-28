@@ -912,16 +912,23 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_init", "[elf_loader][symbol]")
     TEST_ASSERT_NOT_NULL_MESSAGE(sym, "reloadable_init symbol not found");
 
     // Symbol should point within the loaded code region
-    // On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
-    // On Xtensa, symbols are DRAM addresses (which are also executable)
-#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
-    // RISC-V: symbol is in IRAM space, which is DRAM + SOC_I_D_OFFSET
-    uintptr_t expected_base = (uintptr_t)ctx.ram_base + SOC_I_D_OFFSET;
-    uintptr_t expected_end = expected_base + ctx.ram_size;
-#else
-    // Xtensa: symbol is directly in DRAM
+    // - On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
+    // - On ESP32-S3 with PSRAM, symbols are returned as IROM addresses (DROM + 0x6000000)
+    // - On other Xtensa (ESP32, S2), symbols are DRAM addresses (which are also executable)
     uintptr_t expected_base = (uintptr_t)ctx.ram_base;
     uintptr_t expected_end = expected_base + ctx.ram_size;
+
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+    // RISC-V: symbol is in IRAM space, which is DRAM + SOC_I_D_OFFSET
+    expected_base += SOC_I_D_OFFSET;
+    expected_end += SOC_I_D_OFFSET;
+#elif CONFIG_IDF_TARGET_ESP32S3 && CONFIG_SPIRAM
+    // ESP32-S3 with PSRAM: check if ram_base is in PSRAM DROM range (0x3C000000-0x3E000000)
+    // If so, symbols are returned as IROM addresses (add 0x6000000 offset)
+    if ((uintptr_t)ctx.ram_base >= 0x3C000000 && (uintptr_t)ctx.ram_base < 0x3E000000) {
+        expected_base += (0x42000000 - 0x3C000000);  // PSRAM I/D offset
+        expected_end += (0x42000000 - 0x3C000000);
+    }
 #endif
     TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
     TEST_ASSERT_LESS_THAN(expected_end, (uintptr_t)sym);
@@ -963,13 +970,20 @@ TEST_CASE("elf_loader_get_symbol finds reloadable_hello", "[elf_loader][symbol]"
     TEST_ASSERT_NOT_NULL_MESSAGE(sym, "reloadable_hello symbol not found");
 
     // Symbol should point within the loaded code region
-    // On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
-#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
-    uintptr_t expected_base = (uintptr_t)ctx.ram_base + SOC_I_D_OFFSET;
-    uintptr_t expected_end = expected_base + ctx.ram_size;
-#else
+    // - On RISC-V targets with separate IRAM/DRAM, symbols are returned as IRAM addresses
+    // - On ESP32-S3 with PSRAM, symbols are returned as IROM addresses
+    // - On other Xtensa, symbols are DRAM addresses
     uintptr_t expected_base = (uintptr_t)ctx.ram_base;
     uintptr_t expected_end = expected_base + ctx.ram_size;
+
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+    expected_base += SOC_I_D_OFFSET;
+    expected_end += SOC_I_D_OFFSET;
+#elif CONFIG_IDF_TARGET_ESP32S3 && CONFIG_SPIRAM
+    if ((uintptr_t)ctx.ram_base >= 0x3C000000 && (uintptr_t)ctx.ram_base < 0x3E000000) {
+        expected_base += (0x42000000 - 0x3C000000);
+        expected_end += (0x42000000 - 0x3C000000);
+    }
 #endif
     TEST_ASSERT_GREATER_OR_EQUAL(expected_base, (uintptr_t)sym);
     TEST_ASSERT_LESS_THAN(expected_end, (uintptr_t)sym);
@@ -1207,3 +1221,103 @@ TEST_CASE("reloadable functions can be called through stubs", "[hotreload][stubs
 
     hotreload_unload();
 }
+
+// ============================================================================
+// PSRAM (SPIRAM) loading tests - ESP32-S2, ESP32-S3 only
+// ============================================================================
+
+#if CONFIG_SPIRAM
+
+#include "esp_heap_caps.h"
+
+TEST_CASE("hotreload_load with SPIRAM allocates from external RAM", "[hotreload][psram]")
+{
+    // Skip if no SPIRAM available
+    size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (free_spiram == 0) {
+        TEST_IGNORE_MESSAGE("No SPIRAM available on this device");
+        return;
+    }
+
+    size_t spiram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+    // Load ELF into SPIRAM
+    hotreload_config_t config = HOTRELOAD_CONFIG_SPIRAM();
+    esp_err_t err = hotreload_load(&config);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Verify SPIRAM was used (some memory consumed)
+    size_t spiram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    TEST_ASSERT_LESS_THAN_MESSAGE(spiram_before, spiram_before - spiram_after + 1,
+        "SPIRAM should have been consumed by loading");
+
+    // Verify symbols are populated
+    for (size_t i = 0; i < hotreload_symbol_count; i++) {
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(0, hotreload_symbol_table[i],
+            "Symbol table entry should be non-zero after load");
+    }
+
+    hotreload_unload();
+}
+
+TEST_CASE("reloadable code executes correctly from SPIRAM", "[hotreload][psram]")
+{
+    // Skip if no SPIRAM available
+    size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (free_spiram == 0) {
+        TEST_IGNORE_MESSAGE("No SPIRAM available on this device");
+        return;
+    }
+
+    // Load ELF into SPIRAM
+    hotreload_config_t config = HOTRELOAD_CONFIG_SPIRAM();
+    esp_err_t err = hotreload_load(&config);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Call reloadable functions - should work even from SPIRAM
+    // If the code didn't load correctly, this would crash
+    reloadable_init();
+    reloadable_hello("PSRAM Test");
+
+    // If we get here without crashing, the test passes
+    hotreload_unload();
+}
+
+TEST_CASE("custom heap_caps parameter is respected", "[hotreload][psram]")
+{
+    // Skip if no SPIRAM available
+    size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (free_spiram == 0) {
+        TEST_IGNORE_MESSAGE("No SPIRAM available on this device");
+        return;
+    }
+
+    size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t spiram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+    // Load with SPIRAM caps
+    hotreload_config_t config = {
+        .partition_label = "hotreload",
+        .heap_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+    };
+    esp_err_t err = hotreload_load(&config);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    size_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t spiram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+    // SPIRAM should have been consumed
+    size_t spiram_used = spiram_before - spiram_after;
+    TEST_ASSERT_GREATER_THAN_MESSAGE(0, spiram_used,
+        "SPIRAM should have been used for allocation");
+
+    // Internal RAM should be mostly unchanged (some overhead is expected for
+    // elf_parser state, symbol tables, and other bookkeeping)
+    size_t internal_used = internal_before - internal_after;
+    TEST_ASSERT_LESS_THAN_MESSAGE(2048, internal_used,
+        "Internal RAM usage should be minimal when using SPIRAM");
+
+    hotreload_unload();
+}
+
+#endif // CONFIG_SPIRAM

@@ -27,6 +27,7 @@ typedef struct {
     void *parser;             /**< Internal: elf_parser handle */
     const void *elf_data;     /**< Pointer to ELF data in flash */
     size_t elf_size;          /**< Size of ELF data */
+    uint32_t heap_caps;       /**< Memory capabilities for allocation (0 = default) */
 } elf_loader_ctx_t;
 
 /**

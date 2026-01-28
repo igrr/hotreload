@@ -19,6 +19,7 @@ extern "C" {
  */
 typedef struct {
     const char *partition_label;    /**< Name of partition containing the reloadable ELF */
+    uint32_t heap_caps;             /**< Memory capabilities for allocation (0 = default: EXEC then DRAM) */
 } hotreload_config_t;
 
 /**
@@ -30,6 +31,24 @@ typedef struct {
  */
 #define HOTRELOAD_CONFIG_DEFAULT() { \
     .partition_label = "hotreload", \
+    .heap_caps = 0, \
+}
+
+/**
+ * @brief Hotreload configuration for PSRAM allocation
+ *
+ * Use this to load reloadable code into PSRAM (external SPI RAM).
+ * Requires ESP32-S2, ESP32-S3, or other chips with PSRAM support.
+ *
+ * Note: Code execution from PSRAM may be slower than from internal RAM.
+ *
+ * Usage:
+ *   hotreload_config_t config = HOTRELOAD_CONFIG_SPIRAM();
+ *   ESP_ERROR_CHECK(hotreload_load(&config));
+ */
+#define HOTRELOAD_CONFIG_SPIRAM() { \
+    .partition_label = "hotreload", \
+    .heap_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, \
 }
 
 /**
