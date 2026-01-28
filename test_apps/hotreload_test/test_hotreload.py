@@ -536,7 +536,7 @@ def get_device_ip_from_serial(dut, timeout: int = 60) -> str:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32", "esp32c3"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32", "esp32c3", "esp32s3"], indirect=True)
 @pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
 def test_hotreload_unit_tests_hardware(dut):
     """
