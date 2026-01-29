@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.7.0 (2026-01-29)
+
+### Feat
+
+- **cmake**: add RELOADABLE keyword to idf_component_register
+- add ESP32-P4 support
+- add ESP32-C6 support
+
+### Refactor
+
+- **port**: extract chip-specific memory code into port layer
+- centralize target lists and reduce maintenance burden
+- **port**: replace hardcoded addresses with SOC_* macros
+
 ## v0.6.0 (2026-01-29)
 
 ### Feat
