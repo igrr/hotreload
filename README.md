@@ -9,13 +9,13 @@ Runtime hot reload for ESP chips - load and reload ELF modules without reflashin
 - **CMake Integration**: Simple `hotreload_setup()` function handles all build complexity
 - **Pre/Post Hooks**: Save and restore application state during reloads
 - **Architecture Support**:
-  - **Xtensa** (ESP32, ESP32-S2, ESP32-S3): R_XTENSA_RELATIVE, R_XTENSA_32, R_XTENSA_JMP_SLOT, R_XTENSA_PLT
-  - **RISC-V** (ESP32-C3, ESP32-C6, ESP32-H2): R_RISCV_RELATIVE, R_RISCV_32, R_RISCV_JUMP_SLOT, R_RISCV_PCREL_HI20/LO12
+  - **Xtensa** (ESP32-S2, ESP32-S3): R_XTENSA_RELATIVE, R_XTENSA_32, R_XTENSA_JMP_SLOT, R_XTENSA_PLT
+  - **RISC-V** (ESP32-C3): R_RISCV_RELATIVE, R_RISCV_32, R_RISCV_JUMP_SLOT, R_RISCV_PCREL_HI20/LO12
 
 ## Requirements
 
 - ESP-IDF v5.0 or later
-- Supported targets: ESP32, ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2
+- Supported targets: ESP32-S2, ESP32-S3, ESP32-C3
 
 ## Installation
 
@@ -334,21 +334,23 @@ See `examples/basic/` for a complete working example with:
 
 ## Testing
 
-Run tests with QEMU for ESP32 (Xtensa):
+Run tests on hardware:
 
 ```bash
 cd test_apps/hotreload_test
-idf.py --preset esp32-qemu build
-pytest test_hotreload.py::test_hotreload_unit_tests -v -s --embedded-services idf,qemu --target esp32 --build-dir build/esp32-qemu
+
+# Build for target
+idf.py --preset esp32s3-hardware build
+
+# Run tests
+pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s \
+    --embedded-services esp,idf \
+    --port /dev/cu.usbserial-XXXX \
+    --target esp32s3 \
+    --build-dir build/esp32s3-hardware
 ```
 
-Run tests with QEMU for ESP32-C3 (RISC-V):
-
-```bash
-cd test_apps/hotreload_test
-idf.py --preset esp32c3-qemu build
-pytest test_hotreload.py::test_hotreload_unit_tests -v -s --embedded-services idf,qemu --target esp32c3 --build-dir build/esp32c3-qemu
-```
+Available presets: `esp32s3-hardware`, `esp32s2-hardware`, `esp32c3-hardware`
 
 ## License
 

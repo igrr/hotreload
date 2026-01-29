@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-This is an ESP32 hot reload system that allows loading and reloading ELF libraries at runtime. The core ELF loader is implemented and supports both **Xtensa** (ESP32, ESP32-S2, ESP32-S3) and **RISC-V** (ESP32-C3, ESP32-C6) architectures.
+This is an ESP32 hot reload system that allows loading and reloading ELF libraries at runtime. The core ELF loader is implemented and supports both **Xtensa** (ESP32-S2, ESP32-S3) and **RISC-V** (ESP32-C3) architectures.
+
+**Note:** ESP32 (original) is not supported due to memory architecture limitations. ESP32-C6 and ESP32-H2 may work but are not yet tested.
 
 **Key Documents:**
 - `DESIGN.md` - Overall system architecture
@@ -18,17 +20,20 @@ hotreload/
 │   ├── elf_parser.c          # ELF file parsing
 │   ├── hotreload.c           # Public API implementation
 │   └── hotreload_server.c    # HTTP server for remote reload
+├── port/
+│   └── elf_loader_mem.c      # Platform-specific memory operations (PSRAM)
 ├── include/
 │   ├── hotreload.h           # Public API
 │   └── elf_loader.h          # ELF loader API
 ├── private_include/
-│   └── elf_parser.h          # Internal ELF parser API
+│   ├── elf_parser.h          # Internal ELF parser API
+│   └── elf_loader_port.h     # Port layer API
 ├── scripts/
 │   ├── gen_ld_script.py      # Linker script generator
 │   └── gen_reloadable.py     # Stub/symbol table generator
 ├── test_apps/hotreload_test/
 │   ├── test_host/hotreload_tests/
-│   │   └── test_elf_loader.c # Unity unit tests (48 test cases)
+│   │   └── test_elf_loader.c # Unity unit tests (48-51 test cases depending on target)
 │   ├── test_hotreload.py     # Pytest integration tests
 │   └── components/reloadable/ # Test reloadable component
 └── project_include.cmake     # Build system integration
@@ -63,32 +68,44 @@ Follow TDD principles for new features:
 
 ### Running Tests
 
-**Using pytest with agent_dev_utils (recommended):**
+**Using CMake presets and pytest (recommended):**
 
 ```bash
 cd test_apps/hotreload_test
 
-# Run on hardware (ESP32-C3 example)
+# Build for a specific target
+idf.py --preset esp32s3-hardware build
+idf.py --preset esp32s2-hardware build
+idf.py --preset esp32c3-hardware build
+
+# Run on hardware with pytest
 pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s \
     --embedded-services esp,idf \
     --port /dev/cu.usbserial-XXXX \
-    --target esp32c3 \
-    --build-dir build/esp32-qemu
+    --target esp32s3 \
+    --build-dir build/esp32s3-hardware
 
-# Run in QEMU (ESP32 only)
+# Run in QEMU (ESP32 only, for reference - not a supported target)
+idf.py --preset esp32-qemu build
 pytest test_hotreload.py::test_hotreload_unit_tests -v -s \
-    --embedded-services idf,qemu
+    --embedded-services idf,qemu \
+    --target esp32 \
+    --build-dir build/esp32-qemu
 ```
 
 **Using idf.py run-project:**
 
+Note: `run-project` is provided by the `agent_dev_utils` component and requires building first.
+
 ```bash
 cd test_apps/hotreload_test
 
-# Run on hardware
-idf.py run-project --target esp32c3
+# Build first, then run on hardware
+idf.py --preset esp32c3-hardware build
+idf.py -p /dev/cu.usbserial-XXXX run-project
 
-# Run in QEMU
+# Run in QEMU (ESP32 only)
+idf.py --preset esp32-qemu build
 idf.py run-project --qemu
 ```
 
@@ -106,11 +123,11 @@ idf.py -p /dev/cu.usbserial-XXXX flash monitor
 The test app uses CMake presets for different configurations:
 
 ```bash
-# Build for QEMU testing
-idf.py --preset esp32-qemu build
-
-# Build for hardware
-idf.py --preset esp32-hardware build
+# Available presets
+idf.py --preset esp32s3-hardware build    # ESP32-S3 hardware
+idf.py --preset esp32s2-hardware build    # ESP32-S2 hardware
+idf.py --preset esp32c3-hardware build    # ESP32-C3 hardware
+idf.py --preset esp32-qemu build          # ESP32 QEMU (for reference only)
 ```
 
 ### Finding Serial Ports
@@ -160,13 +177,15 @@ git push && git push --tags
 
 ## Architecture-Specific Notes
 
-### Xtensa (ESP32, ESP32-S2, ESP32-S3)
+### Xtensa (ESP32-S2, ESP32-S3)
 
-- Code can execute from IRAM or flash
+- Code can execute from IRAM, PSRAM (with instruction cache), or flash
+- ESP32-S2/S3 support PSRAM for code loading via MMU address translation
 - Relocations: R_XTENSA_32, R_XTENSA_SLOT0_OP, R_XTENSA_ASM_EXPAND
 - L32R instruction requires literal pools within 256KB range
+- **ESP32 (original) is NOT supported** - memory architecture incompatible
 
-### RISC-V (ESP32-C3, ESP32-C6)
+### RISC-V (ESP32-C3)
 
 - Code must execute from IRAM (address 0x403xxxxx)
 - Data accessed from DRAM (address 0x3FCxxxxx)
@@ -177,7 +196,7 @@ git push && git push --tags
 ### Memory Allocation
 
 ```c
-// Preferred: executable memory (ESP32, ESP32-S2, ESP32-S3)
+// Preferred: executable memory (ESP32-S2, ESP32-S3)
 heap_caps_malloc(size, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
 
 // Fallback: DRAM (works on all chips, slower for code)
