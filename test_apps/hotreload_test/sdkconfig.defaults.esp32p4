@@ -6,3 +6,13 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # Support older chip revisions (v1.0 dev boards)
 CONFIG_ESP32P4_REV_MIN_0=y
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+
+# Disable memory protection to allow loading executable code at runtime
+# Hot reload requires executing code from dynamically allocated memory,
+# which conflicts with W^X (write XOR execute) enforcement
+CONFIG_ESP_SYSTEM_MEMPROT_FEATURE=n
+
+# Required for agent_dev_utils coredump capture and crash analysis
+CONFIG_ESP_COREDUMP_ENABLE_TO_UART=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
