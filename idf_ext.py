@@ -184,17 +184,44 @@ def _upload_and_reload(url: str, elf_path: Path, verbose: bool = False) -> bool:
         return False
 
 
-def _find_reloadable_sources(project: Path) -> List[Path]:
-    """Find directories containing reloadable component sources."""
-    sources = []
+def _find_reloadable_sources(project: Path, build_dir: Path) -> List[Path]:
+    """Find directories containing reloadable component sources.
 
-    # Look for components using hotreload_setup() in their CMakeLists.txt
+    Components can be marked reloadable in two ways:
+    1. RELOADABLE keyword in idf_component_register() in CMakeLists.txt
+    2. Listed in CONFIG_HOTRELOAD_COMPONENTS in sdkconfig
+    """
+    sources = []
     components_dir = project / "components"
-    if components_dir.exists():
-        for cmake_file in components_dir.glob("*/CMakeLists.txt"):
-            content = cmake_file.read_text()
-            if "hotreload_setup" in content:
-                sources.append(cmake_file.parent)
+
+    if not components_dir.exists():
+        return sources
+
+    # Get list of components from CONFIG_HOTRELOAD_COMPONENTS
+    config_components: Set[str] = set()
+    try:
+        from idf_py_actions.tools import get_sdkconfig_value
+        project_desc_path = build_dir / "project_description.json"
+        if project_desc_path.exists():
+            import json
+            with open(project_desc_path) as f:
+                project_desc = json.load(f)
+            config_file = project_desc.get("config_file")
+            if config_file:
+                value = get_sdkconfig_value(config_file, "CONFIG_HOTRELOAD_COMPONENTS")
+                if value:
+                    config_components = {c.strip() for c in value.split(";")}
+    except ImportError:
+        pass  # Not running within idf.py context
+
+    # Check each component
+    for cmake_file in components_dir.glob("*/CMakeLists.txt"):
+        component_name = cmake_file.parent.name
+        content = cmake_file.read_text()
+
+        # Check for RELOADABLE keyword or if component is in CONFIG_HOTRELOAD_COMPONENTS
+        if "RELOADABLE" in content or component_name in config_components:
+            sources.append(cmake_file.parent)
 
     return sources
 
@@ -420,11 +447,11 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
             url = f"http://{url}"
 
         # Find reloadable source directories
-        source_dirs = _find_reloadable_sources(project)
+        source_dirs = _find_reloadable_sources(project, build_dir)
 
         if not source_dirs:
             print("Error: No reloadable components found.")
-            print("Make sure you have a component using hotreload_setup().")
+            print("Make sure you have a component with RELOADABLE keyword or listed in CONFIG_HOTRELOAD_COMPONENTS.")
             sys.exit(1)
 
         extensions = {".c", ".h", ".cpp", ".hpp", ".cc", ".cxx"}

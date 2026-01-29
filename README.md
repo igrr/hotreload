@@ -210,7 +210,7 @@ idf.py watch --url http://192.168.1.100:8080 --debounce 1.0
 ```
 
 The watch command:
-1. Monitors components using `hotreload_setup()` for file changes
+1. Monitors components marked with `RELOADABLE` or listed in `CONFIG_HOTRELOAD_COMPONENTS` for file changes
 2. Waits for changes to settle (debouncing)
 3. Automatically rebuilds and uploads to the device
 4. Shows build errors inline

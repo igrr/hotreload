@@ -393,7 +393,7 @@ class OutputCapture:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
+@pytest.mark.parametrize("target", ["esp32s3"], indirect=True)  # esp32s3 supports both hotreload and QEMU
 def test_idf_watch_with_qemu(target, original_code):
     """
     Test the idf.py watch command combined with QEMU.
@@ -414,10 +414,13 @@ def test_idf_watch_with_qemu(target, original_code):
     test_port = 8081
 
     # Step 1: Start idf.py watch qemu with network forwarding
-    print(f"Step 1: Starting 'idf.py watch --url http://127.0.0.1:{test_port} qemu'...")
+    # Use -B to specify build directory, which is required for loading component extensions
+    build_dir = f"build/{target}-qemu"
+    print(f"Step 1: Starting 'idf.py -B {build_dir} watch --url http://127.0.0.1:{test_port} qemu'...")
     process = subprocess.Popen(
         [
-            "idf.py", "watch",
+            "idf.py", "-B", build_dir,
+            "watch",
             "--url", f"http://127.0.0.1:{test_port}",
             "qemu",
             "--qemu-extra-args", f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:8080",

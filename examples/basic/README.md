@@ -15,7 +15,7 @@ basic/
 │       ├── reloadable.c      # Functions that can be updated at runtime
 │       ├── include/
 │       │   └── reloadable.h  # Public API
-│       └── CMakeLists.txt    # Uses hotreload_setup()
+│       └── CMakeLists.txt    # Uses RELOADABLE keyword
 ├── partitions.csv            # Partition table with hotreload partition
 └── sdkconfig.defaults        # Default configuration
 ```
@@ -112,7 +112,7 @@ void reloadable_hello(const char *name)
 
 Try changing `"Hello"` to `"Goodbye"` and running `idf.py reload` to see the change take effect!
 
-The `CMakeLists.txt` uses `hotreload_setup()` to:
+The `CMakeLists.txt` uses the `RELOADABLE` keyword to:
 1. Build this code as a position-independent shared library
 2. Generate stubs and symbol table for the main app
 3. Create a flashable ELF for the hotreload partition
