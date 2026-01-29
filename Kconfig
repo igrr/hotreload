@@ -1,0 +1,25 @@
+menu "Hot Reload"
+
+    config HOTRELOAD_PARTITION
+        string "Partition name for reloadable ELF"
+        default "hotreload"
+        help
+            Name of the flash partition where reloadable ELF files are stored.
+            This partition should be defined in your partitions.csv file.
+
+    config HOTRELOAD_COMPONENTS
+        string "Reloadable components (semicolon-separated)"
+        default ""
+        help
+            Semicolon-separated list of component names to make reloadable.
+            Example: "reloadable;my_module"
+
+            This allows making components reloadable without modifying their
+            CMakeLists.txt files. Components listed here will have their source
+            files compiled into a reloadable shared library instead of being
+            linked into the main application.
+
+            Alternatively, add the RELOADABLE keyword to idf_component_register()
+            in the component's CMakeLists.txt.
+
+endmenu

@@ -6,7 +6,7 @@ Runtime hot reload for ESP chips - load and reload ELF modules without reflashin
 
 - **Runtime ELF Loading**: Load position-independent code from flash or RAM at runtime
 - **HTTP Server**: Upload and reload code over the network
-- **CMake Integration**: Simple `hotreload_setup()` function handles all build complexity
+- **CMake Integration**: Simple `RELOADABLE` keyword in `idf_component_register()` handles all build complexity
 - **Pre/Post Hooks**: Save and restore application state during reloads
 - **PSRAM Support**: On chips with PSRAM, load reloadable code into external memory
 - **Multi-Architecture**: Supports both Xtensa and RISC-V instruction sets
@@ -75,21 +75,21 @@ void reloadable_greet(const char *name) {
 
 **CMakeLists.txt**:
 ```cmake
-# Register with a dummy source (stubs will be generated)
 idf_component_register(
+    RELOADABLE
     INCLUDE_DIRS "include"
     PRIV_REQUIRES esp_system
-    SRCS dummy.c
-)
-
-# Set up hot reload build
-hotreload_setup(
     SRCS reloadable.c
-    PARTITION "hotreload"
 )
 ```
 
-Create an empty `dummy.c` file (required by ESP-IDF component system).
+**Alternative: Using Kconfig**
+
+You can also make components reloadable via sdkconfig without modifying their CMakeLists.txt:
+
+```
+CONFIG_HOTRELOAD_COMPONENTS="reloadable;my_other_module"
+```
 
 ### 3. Use in Your Application
 
@@ -233,9 +233,9 @@ When code is reloaded, only the symbol table is updated. The stubs remain unchan
 
 ### Build Process
 
-The `hotreload_setup()` CMake function:
+When a component uses the `RELOADABLE` keyword (or is listed in `CONFIG_HOTRELOAD_COMPONENTS`), the build system:
 
-1. Compiles reloadable sources as a shared library
+1. Compiles reloadable sources as a shared library (separate from main app)
 2. Extracts exported symbols using `nm`
 3. Generates assembly stubs for each function
 4. Generates a C file with the symbol table

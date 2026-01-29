@@ -1,12 +1,126 @@
 # Hotreload component CMake support
 # This file is automatically included by ESP-IDF during project configuration.
-# It provides the hotreload_setup() function for building reloadable components.
+# It provides simplified reloadable component registration.
 
 # Store the path to hotreload scripts directory
 set(HOTRELOAD_SCRIPTS_DIR "${CMAKE_CURRENT_LIST_DIR}/scripts")
 
-# Function to set up hotreload build infrastructure for a component
-# Call this AFTER idf_component_register() in your component's CMakeLists.txt.
+# Generate a dummy source file for reloadable components
+# This is created once and reused by all reloadable components
+set(HOTRELOAD_DUMMY_SRC "${CMAKE_BINARY_DIR}/hotreload_dummy.c")
+if(NOT EXISTS "${HOTRELOAD_DUMMY_SRC}")
+    file(WRITE "${HOTRELOAD_DUMMY_SRC}" "/* Auto-generated dummy for hotreload components */\n")
+endif()
+
+# =============================================================================
+# Override idf_component_register to support RELOADABLE keyword
+# =============================================================================
+# This uses CMake's undocumented behavior where redefining a function/macro
+# automatically renames the previous definition with an underscore prefix.
+#
+# Two ways to make a component reloadable:
+# 1. Add RELOADABLE keyword to idf_component_register()
+# 2. Add component name to CONFIG_HOTRELOAD_COMPONENTS in sdkconfig
+#
+# Example:
+#   idf_component_register(
+#       RELOADABLE
+#       INCLUDE_DIRS "include"
+#       PRIV_REQUIRES esp_system
+#       SRCS reloadable.c
+#   )
+# =============================================================================
+
+# Helper function to check if component should be reloadable via Kconfig
+function(_hotreload_is_in_config_list component_name result_var)
+    set(${result_var} FALSE PARENT_SCOPE)
+    if(DEFINED CONFIG_HOTRELOAD_COMPONENTS AND NOT "${CONFIG_HOTRELOAD_COMPONENTS}" STREQUAL "")
+        # Split by semicolon and check membership
+        string(REPLACE ";" ";" _reload_list "${CONFIG_HOTRELOAD_COMPONENTS}")
+        foreach(_comp IN LISTS _reload_list)
+            string(STRIP "${_comp}" _comp)
+            if("${_comp}" STREQUAL "${component_name}")
+                set(${result_var} TRUE PARENT_SCOPE)
+                return()
+            endif()
+        endforeach()
+    endif()
+endfunction()
+
+# Check if we've already overridden (prevent issues if included twice)
+if(NOT COMMAND _hotreload_idf_component_register_overridden)
+    # Marker to indicate we've done the override
+    function(_hotreload_idf_component_register_overridden)
+    endfunction()
+
+    # Override idf_component_register with a macro (preserves variable scope)
+    macro(idf_component_register)
+        # Copy args to a list we can manipulate
+        set(_hreg_args ${ARGN})
+        set(_hreg_is_reloadable FALSE)
+        set(_hreg_reloadable_srcs "")
+
+        # Check for RELOADABLE keyword
+        list(FIND _hreg_args "RELOADABLE" _hreg_reloadable_idx)
+        if(NOT _hreg_reloadable_idx EQUAL -1)
+            set(_hreg_is_reloadable TRUE)
+            list(REMOVE_AT _hreg_args ${_hreg_reloadable_idx})
+        endif()
+
+        # Check CONFIG_HOTRELOAD_COMPONENTS list
+        if(NOT _hreg_is_reloadable)
+            _hotreload_is_in_config_list("${COMPONENT_NAME}" _hreg_is_reloadable)
+        endif()
+
+        if(_hreg_is_reloadable)
+            # Parse arguments to extract SRCS
+            cmake_parse_arguments(_hreg_parsed "" "" "SRCS;INCLUDE_DIRS;REQUIRES;PRIV_REQUIRES;LDFRAGMENTS;EMBED_FILES;EMBED_TXTFILES" ${_hreg_args})
+
+            if(NOT DEFINED _hreg_parsed_SRCS OR "${_hreg_parsed_SRCS}" STREQUAL "")
+                message(FATAL_ERROR "Reloadable component '${COMPONENT_NAME}' must have SRCS specified")
+            endif()
+
+            # Save the real sources for hotreload_setup
+            set(_hreg_reloadable_srcs ${_hreg_parsed_SRCS})
+
+            # Rebuild args with dummy source instead of real sources
+            set(_hreg_modified_args SRCS "${HOTRELOAD_DUMMY_SRC}")
+            if(DEFINED _hreg_parsed_INCLUDE_DIRS)
+                list(APPEND _hreg_modified_args INCLUDE_DIRS ${_hreg_parsed_INCLUDE_DIRS})
+            endif()
+            if(DEFINED _hreg_parsed_REQUIRES)
+                list(APPEND _hreg_modified_args REQUIRES ${_hreg_parsed_REQUIRES})
+            endif()
+            if(DEFINED _hreg_parsed_PRIV_REQUIRES)
+                list(APPEND _hreg_modified_args PRIV_REQUIRES ${_hreg_parsed_PRIV_REQUIRES})
+            endif()
+            if(DEFINED _hreg_parsed_LDFRAGMENTS)
+                list(APPEND _hreg_modified_args LDFRAGMENTS ${_hreg_parsed_LDFRAGMENTS})
+            endif()
+            if(DEFINED _hreg_parsed_EMBED_FILES)
+                list(APPEND _hreg_modified_args EMBED_FILES ${_hreg_parsed_EMBED_FILES})
+            endif()
+            if(DEFINED _hreg_parsed_EMBED_TXTFILES)
+                list(APPEND _hreg_modified_args EMBED_TXTFILES ${_hreg_parsed_EMBED_TXTFILES})
+            endif()
+
+            # Call original idf_component_register with dummy source
+            _idf_component_register(${_hreg_modified_args})
+
+            # Now set up hotreload with the real sources
+            hotreload_setup(SRCS ${_hreg_reloadable_srcs})
+        else()
+            # Not a reloadable component - call original directly
+            _idf_component_register(${_hreg_args})
+        endif()
+    endmacro()
+endif()
+
+# =============================================================================
+# hotreload_setup function
+# =============================================================================
+# Sets up hotreload build infrastructure for a component.
+# Called automatically for RELOADABLE components, or can be called manually.
 #
 # This function:
 # 1. Builds the component sources as a shared library
@@ -15,13 +129,6 @@ set(HOTRELOAD_SCRIPTS_DIR "${CMAKE_CURRENT_LIST_DIR}/scripts")
 # 4. Rebuilds with linker script
 # 5. Strips unnecessary sections
 # 6. Sets up flash targets
-#
-# Usage:
-#   idf_component_register(INCLUDE_DIRS "include" PRIV_REQUIRES esp_system SRCS dummy.c)
-#   hotreload_setup(
-#       SRCS reloadable.c
-#       PARTITION "hotreload"
-#   )
 #
 function(hotreload_setup)
     cmake_parse_arguments(
@@ -32,9 +139,13 @@ function(hotreload_setup)
         ${ARGN}
     )
 
-    # Default partition name
+    # Default partition name from Kconfig, fallback to "hotreload"
     if(NOT DEFINED HREG_PARTITION)
-        set(HREG_PARTITION "hotreload")
+        if(DEFINED CONFIG_HOTRELOAD_PARTITION AND NOT "${CONFIG_HOTRELOAD_PARTITION}" STREQUAL "")
+            set(HREG_PARTITION "${CONFIG_HOTRELOAD_PARTITION}")
+        else()
+            set(HREG_PARTITION "hotreload")
+        endif()
     endif()
 
     if(NOT DEFINED HREG_SRCS)
