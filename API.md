@@ -3,13 +3,8 @@
 ## Header files
 
 - [hotreload.h](#file-hotreloadh)
-- [reloadable_util.h](#file-reloadable_utilh)
 
 ## File hotreload.h
-
-
-
-
 
 ## Structures and Types
 
@@ -23,15 +18,15 @@
 
 | Type | Name |
 | ---: | :--- |
-|  esp\_err\_t | [**hotreload\_load**](#function-hotreload_load) (const [**hotreload\_config\_t**](#struct-hotreload_config_t) \*config) <br>_Load a reloadable ELF from flash partition._ |
-|  esp\_err\_t | [**hotreload\_load\_from\_buffer**](#function-hotreload_load_from_buffer) (const void \*elf\_data, size\_t elf\_size) <br>_Load a reloadable ELF from a RAM buffer._ |
-|  esp\_err\_t | [**hotreload\_register\_post\_hook**](#function-hotreload_register_post_hook) (hotreload\_hook\_fn\_t hook, void \*user\_ctx) <br>_Register a post-reload hook._ |
-|  esp\_err\_t | [**hotreload\_register\_pre\_hook**](#function-hotreload_register_pre_hook) (hotreload\_hook\_fn\_t hook, void \*user\_ctx) <br>_Register a pre-reload hook._ |
-|  esp\_err\_t | [**hotreload\_reload**](#function-hotreload_reload) (const [**hotreload\_config\_t**](#struct-hotreload_config_t) \*config) <br>_Reload from partition with hooks._ |
-|  esp\_err\_t | [**hotreload\_server\_start**](#function-hotreload_server_start) (const [**hotreload\_server\_config\_t**](#struct-hotreload_server_config_t) \*config) <br>_Start the hotreload HTTP server._ |
+|  esp\_err\_t | [**hotreload\_load**](#function-hotreload_load) (const [**hotreload\_config\_t**](#struct-hotreload_config_t)\* config) <br>_Load a reloadable ELF from flash partition._ |
+|  esp\_err\_t | [**hotreload\_load\_from\_buffer**](#function-hotreload_load_from_buffer) (const void \* elf\_data, size\_t elf\_size) <br>_Load a reloadable ELF from a RAM buffer._ |
+|  esp\_err\_t | [**hotreload\_register\_post\_hook**](#function-hotreload_register_post_hook) (hotreload\_hook\_fn\_t hook, void \* user\_ctx) <br>_Register a post-reload hook._ |
+|  esp\_err\_t | [**hotreload\_register\_pre\_hook**](#function-hotreload_register_pre_hook) (hotreload\_hook\_fn\_t hook, void \* user\_ctx) <br>_Register a pre-reload hook._ |
+|  esp\_err\_t | [**hotreload\_reload**](#function-hotreload_reload) (const [**hotreload\_config\_t**](#struct-hotreload_config_t)\* config) <br>_Reload from partition with hooks._ |
+|  esp\_err\_t | [**hotreload\_server\_start**](#function-hotreload_server_start) (const [**hotreload\_server\_config\_t**](#struct-hotreload_server_config_t)\* config) <br>_Start the hotreload HTTP server._ |
 |  esp\_err\_t | [**hotreload\_server\_stop**](#function-hotreload_server_stop) (void) <br>_Stop the hotreload HTTP server._ |
 |  esp\_err\_t | [**hotreload\_unload**](#function-hotreload_unload) (void) <br>_Unload the currently loaded reloadable ELF._ |
-|  esp\_err\_t | [**hotreload\_update\_partition**](#function-hotreload_update_partition) (const char \*partition\_label, const void \*elf\_data, size\_t elf\_size) <br>_Write ELF data to the hotreload partition._ |
+|  esp\_err\_t | [**hotreload\_update\_partition**](#function-hotreload_update_partition) (const char \* partition\_label, const void \* elf\_data, size\_t elf\_size) <br>_Write ELF data to the hotreload partition._ |
 
 ## Macros
 
@@ -46,7 +41,6 @@
 ### struct `hotreload_config_t`
 
 _Configuration for hotreload\_load()_
-
 Variables:
 
 -  uint32\_t heap_caps  <br>Memory capabilities for allocation (0 = default: EXEC then DRAM)
@@ -60,7 +54,6 @@ _Callback type for reload hooks._
 typedef void(* hotreload_hook_fn_t) (void *user_ctx);
 ```
 
-
 **Parameters:**
 
 
@@ -68,7 +61,6 @@ typedef void(* hotreload_hook_fn_t) (void *user_ctx);
 ### struct `hotreload_server_config_t`
 
 _Configuration for the hotreload HTTP server._
-
 Variables:
 
 -  size\_t max_elf_size  <br>Maximum ELF size to accept (default: 128KB)
@@ -85,13 +77,11 @@ Variables:
 _Load a reloadable ELF from flash partition._
 ```c
 esp_err_t hotreload_load (
-    const hotreload_config_t *config
+    const hotreload_config_t * config
 ) 
 ```
 
-
 This function performs the complete ELF loading workflow:
-
 * Memory-maps the partition containing the ELF
 * Validates the ELF header
 * Allocates RAM for the loaded code/data
@@ -113,7 +103,6 @@ After successful return, calling functions through the generated stubs (which re
 **Returns:**
 
 
-
 * ESP\_OK: Success, symbol table populated
 * ESP\_ERR\_INVALID\_ARG: Invalid arguments
 * ESP\_ERR\_NOT\_FOUND: Partition not found, or ELF has no loadable sections
@@ -125,11 +114,10 @@ After successful return, calling functions through the generated stubs (which re
 _Load a reloadable ELF from a RAM buffer._
 ```c
 esp_err_t hotreload_load_from_buffer (
-    const void *elf_data,
+    const void * elf_data,
     size_t elf_size
 ) 
 ```
-
 
 Similar to hotreload\_load(), but loads from a RAM buffer instead of a flash partition. The buffer must remain valid while the ELF is loaded.
 
@@ -145,7 +133,6 @@ Similar to hotreload\_load(), but loads from a RAM buffer instead of a flash par
 **Returns:**
 
 
-
 * ESP\_OK: Success
 * ESP\_ERR\_INVALID\_ARG: Invalid arguments
 * Other errors from ELF loader
@@ -155,10 +142,9 @@ _Register a post-reload hook._
 ```c
 esp_err_t hotreload_register_post_hook (
     hotreload_hook_fn_t hook,
-    void *user_ctx
+    void * user_ctx
 ) 
 ```
-
 
 The hook is called after successfully loading new ELF. Use this to restore state or reinitialize reloadable code.
 
@@ -174,7 +160,6 @@ The hook is called after successfully loading new ELF. Use this to restore state
 **Returns:**
 
 
-
 * ESP\_OK: Success
 ### function `hotreload_register_pre_hook`
 
@@ -182,10 +167,9 @@ _Register a pre-reload hook._
 ```c
 esp_err_t hotreload_register_pre_hook (
     hotreload_hook_fn_t hook,
-    void *user_ctx
+    void * user_ctx
 ) 
 ```
-
 
 The hook is called just before unloading the current ELF. Use this to save state or release resources held by reloadable code.
 
@@ -201,20 +185,17 @@ The hook is called just before unloading the current ELF. Use this to save state
 **Returns:**
 
 
-
 * ESP\_OK: Success
 ### function `hotreload_reload`
 
 _Reload from partition with hooks._
 ```c
 esp_err_t hotreload_reload (
-    const hotreload_config_t *config
+    const hotreload_config_t * config
 ) 
 ```
 
-
 Convenience function that:
-
 * Calls pre-reload hook (if registered)
 * Unloads current ELF
 * Loads new ELF from partition
@@ -231,7 +212,6 @@ Convenience function that:
 **Returns:**
 
 
-
 * ESP\_OK: Success
 * Other errors from hotreload\_load()
 ### function `hotreload_server_start`
@@ -239,13 +219,11 @@ Convenience function that:
 _Start the hotreload HTTP server._
 ```c
 esp_err_t hotreload_server_start (
-    const hotreload_server_config_t *config
+    const hotreload_server_config_t * config
 ) 
 ```
 
-
 Starts an HTTP server that accepts:
-
 * POST /upload - Upload ELF file to flash partition
 * POST /reload - Reload from flash partition
 * POST /upload-and-reload - Upload and reload in one request
@@ -262,7 +240,6 @@ Starts an HTTP server that accepts:
 **Returns:**
 
 
-
 * ESP\_OK: Server started
 * ESP\_ERR\_INVALID\_ARG: Invalid config
 * ESP\_ERR\_INVALID\_STATE: Server already running
@@ -276,9 +253,7 @@ esp_err_t hotreload_server_stop (
 ) 
 ```
 
-
 **Returns:**
-
 
 
 * ESP\_OK: Server stopped
@@ -292,13 +267,11 @@ esp_err_t hotreload_unload (
 ) 
 ```
 
-
 Frees the RAM allocated for the loaded ELF. After calling this, the symbol table entries are invalid and calling through stubs will cause a crash.
 
 
 
 **Returns:**
-
 
 
 * ESP\_OK: Success
@@ -308,12 +281,11 @@ Frees the RAM allocated for the loaded ELF. After calling this, the symbol table
 _Write ELF data to the hotreload partition._
 ```c
 esp_err_t hotreload_update_partition (
-    const char *partition_label,
-    const void *elf_data,
+    const char * partition_label,
+    const void * elf_data,
     size_t elf_size
 ) 
 ```
-
 
 Erases the partition and writes the provided ELF data. Does not load the ELF - call hotreload\_load() afterwards.
 
@@ -328,7 +300,6 @@ Erases the partition and writes the provided ELF data. Does not load the ELF - c
 
 
 **Returns:**
-
 
 
 * ESP\_OK: Success
@@ -351,8 +322,7 @@ _Default hotreload configuration._
 }
 ```
 
-
-Usage: [**hotreload\_config\_t**](#struct-hotreload_config_t) config = HOTRELOAD\_CONFIG\_DEFAULT(); ESP\_ERROR\_CHECK(hotreload\_load(&config));
+Usage: [**hotreload\_config\_t**](#struct-hotreload_config_t)config = HOTRELOAD\_CONFIG\_DEFAULT(); ESP\_ERROR\_CHECK(hotreload\_load(&config));
 ### define `HOTRELOAD_CONFIG_SPIRAM`
 
 _Hotreload configuration for PSRAM allocation._
@@ -365,12 +335,11 @@ _Hotreload configuration for PSRAM allocation._
 }
 ```
 
-
 Use this to load reloadable code into PSRAM (external SPI RAM). Requires a chip with PSRAM support.
 
 Note: Code execution from PSRAM may be slower than from internal RAM.
 
-Usage: [**hotreload\_config\_t**](#struct-hotreload_config_t) config = HOTRELOAD\_CONFIG\_SPIRAM(); ESP\_ERROR\_CHECK(hotreload\_load(&config));
+Usage: [**hotreload\_config\_t**](#struct-hotreload_config_t)config = HOTRELOAD\_CONFIG\_SPIRAM(); ESP\_ERROR\_CHECK(hotreload\_load(&config));
 ### define `HOTRELOAD_SERVER_CONFIG_DEFAULT`
 
 _Default hotreload server configuration._
@@ -384,18 +353,5 @@ _Default hotreload server configuration._
 }
 ```
 
-
-Usage: [**hotreload\_server\_config\_t**](#struct-hotreload_server_config_t) config = HOTRELOAD\_SERVER\_CONFIG\_DEFAULT(); ESP\_ERROR\_CHECK(hotreload\_server\_start(&config));
-
-## File reloadable_util.h
-
-
-
-
-
-
-
-
-
-
+Usage: [**hotreload\_server\_config\_t**](#struct-hotreload_server_config_t)config = HOTRELOAD\_SERVER\_CONFIG\_DEFAULT(); ESP\_ERROR\_CHECK(hotreload\_server\_start(&config));
 
