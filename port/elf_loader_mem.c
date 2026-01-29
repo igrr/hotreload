@@ -52,16 +52,16 @@ static const char *TAG = "elf_port_mem";
  * ESP32-S3:
  * ---------
  * PSRAM is accessible through two address ranges with a fixed offset:
- * - Data bus (DROM): 0x3C000000 - 0x3E000000 (for read/write access)
- * - Instruction bus (IROM): 0x42000000 - 0x44000000 (for code execution)
- * Simple address translation: IROM_addr = DROM_addr + 0x6000000
+ * - Data bus (DROM): SOC_DROM_LOW - SOC_DROM_HIGH (0x3C000000 - 0x3E000000)
+ * - Instruction bus (IROM): SOC_IROM_LOW - SOC_IROM_HIGH (0x42000000 - 0x44000000)
+ * Simple address translation: IROM_addr = DROM_addr + (SOC_IROM_LOW - SOC_DROM_LOW)
  *
  * ESP32-S2:
  * ---------
- * PSRAM data is at 0x3F500000-0x3FF80000, but instruction cache requires
- * explicit MMU configuration. We find free MMU entries and map PSRAM there.
- * The instruction address is calculated dynamically based on which MMU
- * entries are allocated.
+ * PSRAM data is at SOC_DRAM1_ADDRESS_LOW-SOC_DRAM1_ADDRESS_HIGH (0x3f800000-0x3fc00000),
+ * but instruction cache requires explicit MMU configuration. We find free MMU
+ * entries in the SOC_IRAM0 range and map PSRAM there. The instruction address
+ * is calculated dynamically based on which MMU entries are allocated.
  */
 
 #if CONFIG_IDF_TARGET_ESP32S3 && CONFIG_SPIRAM
@@ -80,29 +80,33 @@ static inline bool is_psram_drom_addr(uintptr_t addr)
 #include "esp32s2/rom/cache.h"
 #include "soc/mmu.h"
 #include "soc/extmem_reg.h"
+#include "soc/ext_mem_defs.h"
 
-/* ESP32-S2 PSRAM starts at this address (IDF 5.x) */
-#define ESP32S2_PSRAM_VADDR_START   0x3f800000
+/*
+ * ESP32-S2 PSRAM address ranges (from soc/ext_mem_defs.h):
+ * - Data bus: SOC_DRAM1_ADDRESS_LOW (0x3f800000) to SOC_DRAM1_ADDRESS_HIGH (0x3fc00000)
+ * - Instruction bus: Mapped dynamically via MMU
+ */
 
 /* MMU configuration */
 #define ESP32S2_MMU_INVALID         BIT(14)
 #define ESP32S2_MMU_UNIT_SIZE       0x10000  /* 64KB per MMU entry */
 #define ESP32S2_MMU_REG             ((volatile uint32_t *)DR_REG_MMU_TABLE)
 
-/* Instruction cache address space */
+/* Instruction cache address space (from soc/ext_mem_defs.h) */
 #define ESP32S2_MMU_IBUS_BASE       SOC_IRAM0_ADDRESS_LOW
 #define ESP32S2_MMU_IBUS_MAX        ((SOC_IRAM0_ADDRESS_HIGH - SOC_IRAM0_ADDRESS_LOW) / ESP32S2_MMU_UNIT_SIZE)
 #define ESP32S2_MMU_IBUS_START_OFF  8  /* First 8 entries reserved for IDF */
 
-/* Address conversion macros */
-#define ESP32S2_PSRAM_OFF(v)        ((v) - ESP32S2_PSRAM_VADDR_START)
+/* Address conversion macros using SOC_* constants */
+#define ESP32S2_PSRAM_OFF(v)        ((v) - SOC_DRAM1_ADDRESS_LOW)
 #define ESP32S2_PSRAM_SECS(v)       (ESP32S2_PSRAM_OFF((uintptr_t)(v)) / ESP32S2_MMU_UNIT_SIZE)
 #define ESP32S2_PSRAM_ALIGN(v)      ((uintptr_t)(v) & (~(ESP32S2_MMU_UNIT_SIZE - 1)))
 #define ESP32S2_ICACHE_ADDR(s)      (ESP32S2_MMU_IBUS_BASE + (s) * ESP32S2_MMU_UNIT_SIZE)
 
 static inline bool is_esp32s2_psram_addr(uintptr_t addr)
 {
-    return addr >= ESP32S2_PSRAM_VADDR_START && addr < 0x3FF80000;
+    return addr >= SOC_DRAM1_ADDRESS_LOW && addr < SOC_DRAM1_ADDRESS_HIGH;
 }
 
 /* External functions for cache/interrupt management */
