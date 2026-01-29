@@ -8,14 +8,13 @@ Runtime hot reload for ESP chips - load and reload ELF modules without reflashin
 - **HTTP Server**: Upload and reload code over the network
 - **CMake Integration**: Simple `hotreload_setup()` function handles all build complexity
 - **Pre/Post Hooks**: Save and restore application state during reloads
-- **Architecture Support**:
-  - **Xtensa** (ESP32-S2, ESP32-S3): R_XTENSA_RELATIVE, R_XTENSA_32, R_XTENSA_JMP_SLOT, R_XTENSA_PLT
-  - **RISC-V** (ESP32-C3): R_RISCV_RELATIVE, R_RISCV_32, R_RISCV_JUMP_SLOT, R_RISCV_PCREL_HI20/LO12
+- **PSRAM Support**: On chips with PSRAM, load reloadable code into external memory
+- **Multi-Architecture**: Supports both Xtensa and RISC-V instruction sets
 
 ## Requirements
 
 - ESP-IDF v5.0 or later
-- Supported targets: ESP32-S2, ESP32-S3, ESP32-C3
+- See [Supported Targets](#supported-targets) below
 
 ## Installation
 
@@ -332,25 +331,31 @@ See `examples/basic/` for a complete working example with:
 - Unity tests for the ELF loader
 - QEMU testing support
 
-## Testing
+## Supported Targets
 
-Run tests on hardware:
+The canonical list of supported targets is in [`idf_component.yml`](idf_component.yml).
+
+| Target | Architecture | Build Command | Notes |
+|--------|-------------|---------------|-------|
+| ESP32-S3 | Xtensa | `idf.py --preset esp32s3-hardware build` | PSRAM supported |
+| ESP32-S2 | Xtensa | `idf.py --preset esp32s2-hardware build` | PSRAM supported |
+| ESP32-C3 | RISC-V | `idf.py --preset esp32c3-hardware build` | |
+
+## Testing
 
 ```bash
 cd test_apps/hotreload_test
 
-# Build for target
-idf.py --preset esp32s3-hardware build
+# Build for your target
+idf.py --preset <target>-hardware build
 
-# Run tests
+# Run tests (replace <target> and port)
 pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s \
     --embedded-services esp,idf \
     --port /dev/cu.usbserial-XXXX \
-    --target esp32s3 \
-    --build-dir build/esp32s3-hardware
+    --target <target> \
+    --build-dir build/<target>-hardware
 ```
-
-Available presets: `esp32s3-hardware`, `esp32s2-hardware`, `esp32c3-hardware`
 
 ## License
 

@@ -38,7 +38,7 @@ typedef struct {
  * @brief Hotreload configuration for PSRAM allocation
  *
  * Use this to load reloadable code into PSRAM (external SPI RAM).
- * Requires ESP32-S2, ESP32-S3, or other chips with PSRAM support.
+ * Requires a chip with PSRAM support.
  *
  * Note: Code execution from PSRAM may be slower than from internal RAM.
  *

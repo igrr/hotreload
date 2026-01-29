@@ -33,12 +33,9 @@ extern "C" {
  * data bus addresses (where code is written) and instruction bus
  * addresses (where code is executed).
  *
- * Usage by chip:
- * - ESP32: Not used (unified address space for internal RAM)
- * - ESP32-S2 with PSRAM: mmu_off, mmu_num for MMU entries; text_off for translation
- * - ESP32-S3 with PSRAM: text_off only (fixed offset 0x6000000)
- * - ESP32-C2/C3: Not needed here (uses SOC_I_D_OFFSET at compile time)
- * - ESP32-C6/H2/P4: Not used (unified address space)
+ * Fields used depend on chip architecture and memory configuration:
+ * - mmu_off, mmu_num: MMU entry tracking for chips requiring dynamic mapping
+ * - text_off: Offset from data address to instruction address (PSRAM or I/D split)
  */
 typedef struct {
     int mmu_off;        /**< ESP32-S2: MMU entry offset (first entry index) */
@@ -53,12 +50,12 @@ typedef struct {
  *
  * Selection strategy:
  * - If heap_caps != 0, use that directly
- * - Otherwise: try MALLOC_CAP_EXEC if available (ESP32, S2, S3)
- * - Fall back to SPIRAM if configured and available (S2, S3, P4)
+ * - Otherwise: try MALLOC_CAP_EXEC if available
+ * - Fall back to SPIRAM if configured and available
  * - Fall back to MALLOC_CAP_32BIT as last resort
  *
- * For ESP32-S2 SPIRAM: also configures MMU entries for code execution.
- * For ESP32-S3 SPIRAM: records fixed address offset in ctx.
+ * On chips requiring MMU configuration for PSRAM code execution,
+ * this function also sets up the necessary mappings.
  *
  * @param size      Required allocation size in bytes
  * @param heap_caps User-specified heap caps (0 = auto-select)
@@ -74,8 +71,8 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
 /**
  * @brief Free memory and clean up context
  *
- * Frees the allocated memory and any associated resources.
- * For ESP32-S2: also frees MMU entries.
+ * Frees the allocated memory and any associated resources
+ * (including MMU entries on chips that require them).
  *
  * @param base Memory base address to free
  * @param ctx  Memory context (may be modified to clear state)
@@ -85,11 +82,9 @@ void elf_port_free(void *base, elf_port_mem_ctx_t *ctx);
 /**
  * @brief Convert data bus address to instruction bus address
  *
- * Behavior by chip:
- * - Unified address space (ESP32, C6, H2, P4): returns input unchanged
- * - I/D offset (C2, C3): adds SOC_I_D_OFFSET
- * - PSRAM with offset (S3): adds IROM-DROM offset if in PSRAM range
- * - PSRAM with MMU (S2): adds ctx->text_off if in PSRAM range
+ * Behavior depends on chip memory architecture:
+ * - Unified address space: returns input unchanged
+ * - Separate I/D buses: adds appropriate offset (SOC_I_D_OFFSET or PSRAM offset)
  *
  * @param ctx       Memory context from elf_port_alloc
  * @param data_addr Address in data address space
@@ -146,8 +141,8 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
  * Performs any architecture-specific fixups needed after sections
  * are loaded but before relocations are applied.
  *
- * Currently only needed for RISC-V with I/D offset (ESP32-C2, C3)
- * for PLT patching. No-op on other chips.
+ * Used for PLT patching on RISC-V chips with separate I/D address spaces.
+ * No-op on chips with unified address space.
  *
  * @param parser    ELF parser handle
  * @param ram_base  Base address of loaded ELF in RAM

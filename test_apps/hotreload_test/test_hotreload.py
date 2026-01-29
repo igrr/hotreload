@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Tests for ESP32 hot reload functionality.
+Tests for ESP hot reload functionality.
 
 This file contains:
 1. Unit tests - run via Unity menu, test ELF loader functions (QEMU and hardware)
@@ -15,24 +15,12 @@ Run unit tests (QEMU):
 Run e2e test (QEMU):
     pytest test_hotreload.py::test_hot_reload_e2e -v -s --embedded-services idf,qemu
 
-Run idf.py reload test (QEMU):
-    pytest test_hotreload.py::test_idf_reload_command -v -s --embedded-services idf,qemu
-
-Run watch + qemu test:
-    pytest test_hotreload.py::test_idf_watch_with_qemu -v -s
-
 == Hardware Tests ==
 Run unit tests (hardware):
-    pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX
+    pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s \\
+        --embedded-services esp,idf --port /dev/cu.usbserial-XXX --target <chip>
 
-Run e2e test (hardware):
-    pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX
-
-== Using CMake Presets ==
-Build for QEMU:     idf.py --preset esp32-qemu build
-Build for hardware: idf.py --preset esp32-hardware build flash
-
-Run all QEMU tests: idf.py --preset esp32-qemu run-project --qemu
+Supported targets are defined in idf_component.yml at the project root.
 """
 
 import subprocess
@@ -42,11 +30,31 @@ import requests
 import pytest
 import re
 import signal
+import yaml
 from pathlib import Path
 
 
 # Test configuration
 PROJECT_DIR = Path(__file__).parent
+COMPONENT_ROOT = PROJECT_DIR.parent.parent  # hotreload/
+
+
+def get_supported_targets() -> list[str]:
+    """Read supported targets from idf_component.yml (single source of truth)."""
+    component_yml = COMPONENT_ROOT / "idf_component.yml"
+    if not component_yml.exists():
+        # Fallback if running from different directory
+        return ["esp32c3", "esp32s2", "esp32s3"]
+    with open(component_yml) as f:
+        manifest = yaml.safe_load(f)
+    return manifest.get("targets", [])
+
+
+# QEMU targets - this list changes rarely as QEMU support is limited
+QEMU_TARGETS = ["esp32", "esp32c3", "esp32s3"]
+
+# Hardware targets - read from component manifest
+SUPPORTED_TARGETS = get_supported_targets()
 RELOADABLE_SRC = PROJECT_DIR / "components" / "reloadable" / "reloadable.c"
 RELOADABLE_ELF = PROJECT_DIR / "build" / "esp-idf" / "reloadable" / "reloadable_stripped.so"
 SERVER_PORT = 8080
@@ -130,11 +138,11 @@ def original_code():
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32", "esp32c3"], indirect=True)
+@pytest.mark.parametrize("target", QEMU_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 def test_hotreload_unit_tests(dut):
     """
-    Run all unit tests via Unity menu (excluding integration tests).
+    Run all unit tests via Unity menu in QEMU (excluding integration tests).
     """
     print("\n=== Running Unit Tests ===\n")
 
@@ -147,7 +155,7 @@ def test_hotreload_unit_tests(dut):
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
@@ -156,7 +164,7 @@ def test_hotreload_unit_tests(dut):
 )
 def test_hot_reload_e2e(dut, original_code):
     """
-    End-to-end test for hot reload functionality.
+    End-to-end test for hot reload functionality in QEMU.
 
     Steps:
     1. Select integration test from Unity menu
@@ -233,7 +241,7 @@ def test_hot_reload_e2e(dut, original_code):
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
@@ -242,7 +250,7 @@ def test_hot_reload_e2e(dut, original_code):
 )
 def test_idf_reload_command(dut, original_code):
     """
-    Test the idf.py reload command end-to-end.
+    Test the idf.py reload command end-to-end in QEMU.
 
     This test verifies that the `idf.py reload` command correctly:
     1. Builds the reloadable component
@@ -385,10 +393,10 @@ class OutputCapture:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
 def test_idf_watch_with_qemu(target, original_code):
     """
-    Test the idf.py watch command combined with qemu.
+    Test the idf.py watch command combined with QEMU.
 
     This test verifies that:
     1. Watch runs in background mode when combined with qemu
@@ -536,14 +544,14 @@ def get_device_ip_from_serial(dut, timeout: int = 60) -> str:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32", "esp32c3", "esp32s2", "esp32s3"], indirect=True)
+@pytest.mark.parametrize("target", SUPPORTED_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
 def test_hotreload_unit_tests_hardware(dut):
     """
     Run all unit tests on real hardware via Unity menu.
 
-    This test runs on actual ESP32 hardware connected via serial port.
-    Use with: pytest ... --port /dev/cu.usbserial-XXX
+    Supported targets are read from idf_component.yml.
+    Use with: pytest ... --port /dev/cu.usbserial-XXX --target <chip>
     """
     print("\n=== Running Unit Tests on Hardware ===\n")
 
@@ -554,7 +562,7 @@ def test_hotreload_unit_tests_hardware(dut):
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("target", SUPPORTED_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
 def test_hot_reload_e2e_hardware(dut, original_code):
     """
@@ -571,7 +579,7 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     Prerequisites:
     - Device must be connected to a network (Ethernet or WiFi)
     - Host must be on the same network as the device
-    - Build with hardware preset: idf.py --preset esp32-hardware build flash
+    - Build with correct preset: idf.py --preset <target>-hardware build flash
     """
     print("\n=== Starting Hot Reload E2E Test on Hardware ===\n")
 
@@ -654,13 +662,13 @@ def test_hot_reload_e2e_hardware(dut, original_code):
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)
+@pytest.mark.parametrize("target", SUPPORTED_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
 def test_idf_reload_command_hardware(dut, original_code):
     """
     Test the idf.py reload command on real hardware.
 
-    Similar to the QEMU version but discovers the device IP from serial output.
+    Discovers the device IP from serial output and runs reload.
     """
     print("\n=== Testing idf.py reload Command on Hardware ===\n")
 
@@ -738,18 +746,18 @@ if __name__ == "__main__":
     print("Hot Reload Test Suite")
     print("=" * 70)
     print()
+    print(f"Supported targets (from idf_component.yml): {', '.join(SUPPORTED_TARGETS)}")
+    print(f"QEMU targets: {', '.join(QEMU_TARGETS)}")
+    print()
     print("== QEMU Tests ==")
     print("  Unit tests:     pytest test_hotreload.py::test_hotreload_unit_tests -v -s --embedded-services idf,qemu")
     print("  E2E test:       pytest test_hotreload.py::test_hot_reload_e2e -v -s --embedded-services idf,qemu")
-    print("  Reload cmd:     pytest test_hotreload.py::test_idf_reload_command -v -s --embedded-services idf,qemu")
-    print("  Watch + qemu:   pytest test_hotreload.py::test_idf_watch_with_qemu -v -s")
     print()
     print("== Hardware Tests ==")
-    print("  Unit tests:     pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX")
-    print("  E2E test:       pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX")
-    print("  Reload cmd:     pytest test_hotreload.py::test_idf_reload_command_hardware -v -s --embedded-services esp,idf --port /dev/cu.usbserial-XXX")
+    print("  Unit tests:     pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s \\")
+    print("                      --embedded-services esp,idf --port /dev/cu.usbserial-XXX --target <chip>")
+    print("  E2E test:       pytest test_hotreload.py::test_hot_reload_e2e_hardware -v -s \\")
+    print("                      --embedded-services esp,idf --port /dev/cu.usbserial-XXX --target <chip>")
     print()
-    print("== Using CMake Presets ==")
-    print("  Build QEMU:     idf.py --preset esp32-qemu build")
-    print("  Build hardware: idf.py --preset esp32-hardware build flash --port /dev/cu.usbserial-XXX")
-    print("  Run QEMU:       idf.py --preset esp32-qemu run-project --qemu")
+    print("== Building ==")
+    print("  idf.py --preset <target>-hardware build    # e.g. esp32s3-hardware")

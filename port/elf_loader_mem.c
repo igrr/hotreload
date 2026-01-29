@@ -227,17 +227,12 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
     } else {
         /* Default allocation strategy:
          *
-         * ESP32 (plain): Must use MALLOC_CAP_EXEC | MALLOC_CAP_8BIT to get D/IRAM
-         * which is dual-mapped: data view at 0x3FFExxxx (byte-addressable) and
-         * instruction view at 0x4007xxxx (executable). Pure IRAM (0x4008xxxx+)
-         * can only be accessed 32-bits at a time and crashes on byte reads.
-         * Using just MALLOC_CAP_32BIT may return pure IRAM which is wrong.
+         * 1. Try MALLOC_CAP_EXEC if available (Xtensa chips)
+         * 2. On chips with PSRAM and MEMPROT (W^X), use SPIRAM instead
+         * 3. Fall back to MALLOC_CAP_32BIT as last resort
          *
-         * ESP32-S2/S3: Use SPIRAM if available (MEMPROT prevents code execution
-         * from internal RAM). Fall back to internal if no SPIRAM.
-         *
-         * ESP32-C2/C3: MALLOC_CAP_EXEC not available, use DRAM which works
-         * for code via IRAM bus mapping.
+         * Note: On RISC-V chips, MALLOC_CAP_EXEC is typically not available.
+         * DRAM works for code because it's accessible via the IRAM bus.
          */
 #if CONFIG_IDF_TARGET_ESP32
         /* ESP32 memory layout for dynamic code loading:
@@ -341,18 +336,16 @@ uintptr_t elf_port_to_exec_addr(const elf_port_mem_ctx_t *ctx,
                                 uintptr_t data_addr)
 {
     /*
-     * Address translation depends on the chip and memory type:
+     * Address translation depends on the chip memory architecture:
      *
-     * 1. Xtensa PSRAM (ESP32-S2, S3):
-     *    Code written to DROM, executed from IROM. Use fixed offset
-     *    (S3) or MMU-calculated offset (S2). MUST be checked first
-     *    because SOC_I_D_OFFSET exists on S3 but is for internal DIRAM.
+     * 1. PSRAM on Xtensa: Code written to DROM, executed from IROM.
+     *    Use fixed offset or MMU-calculated offset. MUST be checked
+     *    first because SOC_I_D_OFFSET may exist but be for internal DIRAM.
      *
-     * 2. RISC-V with I/D offset (ESP32-C2, C3):
-     *    Code runs from IRAM, data from DRAM. Add SOC_I_D_OFFSET.
+     * 2. RISC-V with I/D offset: Code runs from IRAM, data from DRAM.
+     *    Add SOC_I_D_OFFSET.
      *
-     * 3. Unified address space (ESP32 IRAM at 0x4008xxxx, C6, H2, P4):
-     *    No translation needed.
+     * 3. Unified address space: No translation needed.
      */
 
 #if CONFIG_IDF_TARGET_ESP32S3 && CONFIG_SPIRAM
@@ -396,10 +389,7 @@ esp_err_t elf_port_sync_cache(void *base, size_t size)
 
     /*
      * Sync CPU cache to ensure instruction bus sees the loaded code.
-     * This is critical on all platforms:
-     * - ESP32-S3 with PSRAM: data written via DROM must be visible via IROM
-     * - ESP32-P4: internal memory accessed via L2 cache needs sync
-     * - Other chips: ensures instruction cache coherency
+     * Critical for chips with separate data/instruction caches or L2 cache.
      *
      * Use esp_cache_msync for portability - it handles platform differences.
      * Use UNALIGNED flag since ELF sections may not be cache-line aligned.

@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-This is an ESP32 hot reload system that allows loading and reloading ELF libraries at runtime. The core ELF loader is implemented and supports both **Xtensa** (ESP32-S2, ESP32-S3) and **RISC-V** (ESP32-C3) architectures.
+This is an ESP hot reload system that allows loading and reloading ELF libraries at runtime. The core ELF loader supports both **Xtensa** and **RISC-V** architectures.
 
-**Note:** ESP32 (original) is not supported due to memory architecture limitations. ESP32-C6 and ESP32-H2 may work but are not yet tested.
+**Supported targets:** See `idf_component.yml` (this is the single source of truth).
 
 **Key Documents:**
 - `DESIGN.md` - Overall system architecture
@@ -73,25 +73,18 @@ Follow TDD principles for new features:
 ```bash
 cd test_apps/hotreload_test
 
-# Build for a specific target
-idf.py --preset esp32s3-hardware build
-idf.py --preset esp32s2-hardware build
-idf.py --preset esp32c3-hardware build
+# Build for target (presets are named <target>-hardware)
+idf.py --preset <target>-hardware build
 
 # Run on hardware with pytest
 pytest test_hotreload.py::test_hotreload_unit_tests_hardware -v -s \
     --embedded-services esp,idf \
     --port /dev/cu.usbserial-XXXX \
-    --target esp32s3 \
-    --build-dir build/esp32s3-hardware
-
-# Run in QEMU (ESP32 only, for reference - not a supported target)
-idf.py --preset esp32-qemu build
-pytest test_hotreload.py::test_hotreload_unit_tests -v -s \
-    --embedded-services idf,qemu \
-    --target esp32 \
-    --build-dir build/esp32-qemu
+    --target <target> \
+    --build-dir build/<target>-hardware
 ```
+
+Hardware test targets are read from `idf_component.yml` automatically.
 
 **Using idf.py run-project:**
 
@@ -101,34 +94,22 @@ Note: `run-project` is provided by the `agent_dev_utils` component and requires 
 cd test_apps/hotreload_test
 
 # Build first, then run on hardware
-idf.py --preset esp32c3-hardware build
+idf.py --preset <target>-hardware build
 idf.py -p /dev/cu.usbserial-XXXX run-project
-
-# Run in QEMU (ESP32 only)
-idf.py --preset esp32-qemu build
-idf.py run-project --qemu
 ```
 
 **Manual build and flash:**
 
 ```bash
 cd test_apps/hotreload_test
-idf.py set-target esp32c3
+idf.py set-target <target>
 idf.py build
 idf.py -p /dev/cu.usbserial-XXXX flash monitor
 ```
 
 ### CMake Presets
 
-The test app uses CMake presets for different configurations:
-
-```bash
-# Available presets
-idf.py --preset esp32s3-hardware build    # ESP32-S3 hardware
-idf.py --preset esp32s2-hardware build    # ESP32-S2 hardware
-idf.py --preset esp32c3-hardware build    # ESP32-C3 hardware
-idf.py --preset esp32-qemu build          # ESP32 QEMU (for reference only)
-```
+The test app uses CMake presets named `<target>-hardware`. See `CMakePresets.json` for the full list.
 
 ### Finding Serial Ports
 
@@ -177,29 +158,30 @@ git push && git push --tags
 
 ## Architecture-Specific Notes
 
-### Xtensa (ESP32-S2, ESP32-S3)
+### Xtensa
 
-- Code can execute from IRAM, PSRAM (with instruction cache), or flash
-- ESP32-S2/S3 support PSRAM for code loading via MMU address translation
+- Code can execute from IRAM, PSRAM (on chips with PSRAM support), or flash
+- On chips with PSRAM, code loading uses MMU address translation
 - Relocations: R_XTENSA_32, R_XTENSA_SLOT0_OP, R_XTENSA_ASM_EXPAND
 - L32R instruction requires literal pools within 256KB range
-- **ESP32 (original) is NOT supported** - memory architecture incompatible
 
-### RISC-V (ESP32-C3)
+### RISC-V
 
-- Code must execute from IRAM (address 0x403xxxxx)
-- Data accessed from DRAM (address 0x3FCxxxxx)
-- `SOC_I_D_OFFSET` (0x700000) separates IRAM/DRAM address spaces
+- On chips with separate I/D address spaces, code runs from IRAM bus, data from DRAM bus
+- `SOC_I_D_OFFSET` separates IRAM/DRAM address spaces (defined in IDF headers)
 - PLT entries patched via `patch_plt_for_iram()` to adjust AUIPC immediates
 - Relocations: R_RISCV_32, R_RISCV_PCREL_HI20/LO12, R_RISCV_JUMP_SLOT
 
 ### Memory Allocation
 
 ```c
-// Preferred: executable memory (ESP32-S2, ESP32-S3)
+// Preferred: executable memory (chips with MALLOC_CAP_EXEC)
 heap_caps_malloc(size, MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
 
-// Fallback: DRAM (works on all chips, slower for code)
+// PSRAM: on chips with PSRAM and MEMPROT
+heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+// Fallback: DRAM (works on all chips)
 heap_caps_malloc(size, MALLOC_CAP_8BIT);
 ```
 
@@ -222,7 +204,7 @@ heap_caps_malloc(size, MALLOC_CAP_8BIT);
    - Check for `esp_cache_msync()` support on target
 
 4. **EXEC memory not available**
-   - Normal on ESP32-C3/C6 (no MALLOC_CAP_EXEC)
+   - Normal on RISC-V chips without MALLOC_CAP_EXEC
    - Falls back to DRAM, code runs via IRAM bus mapping
 
 ### Debug Logging
