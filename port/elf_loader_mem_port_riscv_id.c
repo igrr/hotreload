@@ -1,0 +1,51 @@
+/*
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file elf_loader_mem_port_riscv_id.c
+ * @brief RISC-V memory port for chips with separate I/D address spaces
+ *
+ * On RISC-V chips with SOC_I_D_OFFSET, code runs from IRAM bus while data
+ * is accessed from DRAM bus. SOC_I_D_OFFSET defines the fixed offset between
+ * these address spaces.
+ */
+
+#include "elf_loader_mem_port.h"
+#include "soc/soc.h"  /* Must be included before checking SOC_I_D_OFFSET */
+
+/* This port is for RISC-V chips with separate I/D address spaces */
+#if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
+
+bool elf_mem_port_prefer_spiram(void)
+{
+    /* RISC-V chips with I/D offset don't typically have SPIRAM for code */
+    return false;
+}
+
+esp_err_t elf_mem_port_init_exec_mapping(void *ram, size_t size,
+                                          elf_port_mem_ctx_t *ctx)
+{
+    /* No setup needed - address translation is a fixed offset */
+    (void)ram;
+    (void)size;
+    (void)ctx;
+    return ESP_OK;
+}
+
+void elf_mem_port_deinit_exec_mapping(elf_port_mem_ctx_t *ctx)
+{
+    /* No cleanup needed */
+    (void)ctx;
+}
+
+uintptr_t elf_mem_port_to_exec_addr(const elf_port_mem_ctx_t *ctx,
+                                     uintptr_t data_addr)
+{
+    (void)ctx;
+    return data_addr + SOC_I_D_OFFSET;
+}
+
+#endif /* CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET) */

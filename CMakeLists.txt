@@ -20,6 +20,22 @@ elseif(CONFIG_IDF_TARGET_ARCH_RISCV)
     list(APPEND srcs "port/elf_loader_reloc_riscv.c")
 endif()
 
+# Add chip-specific memory port implementation
+# Selection order matters - more specific checks first
+if(CONFIG_IDF_TARGET_ESP32S2)
+    # ESP32-S2: MMU-based PSRAM code execution
+    list(APPEND srcs "port/elf_loader_mem_port_esp32s2.c")
+elseif(CONFIG_IDF_TARGET_ESP32S3)
+    # ESP32-S3: Fixed offset PSRAM code execution
+    list(APPEND srcs "port/elf_loader_mem_port_esp32s3.c")
+elseif(CONFIG_IDF_TARGET_ESP32C2 OR CONFIG_IDF_TARGET_ESP32C3)
+    # RISC-V chips with separate I/D address spaces (SOC_I_D_OFFSET)
+    list(APPEND srcs "port/elf_loader_mem_port_riscv_id.c")
+else()
+    # Default: unified address space (C6, H2, P4, future chips)
+    list(APPEND srcs "port/elf_loader_mem_port_default.c")
+endif()
+
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS

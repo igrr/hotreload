@@ -1,0 +1,84 @@
+/*
+ * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @file elf_loader_mem_port.h
+ * @brief Internal port layer for chip-specific memory operations
+ *
+ * This header defines the micro-porting layer that isolates chip-specific
+ * memory handling from the common ELF loader memory logic. Implementations
+ * are selected at build time based on IDF_TARGET:
+ *
+ * - elf_loader_mem_port_esp32s2.c: MMU management for PSRAM code execution
+ * - elf_loader_mem_port_esp32s3.c: Fixed offset for PSRAM code execution
+ * - elf_loader_mem_port_riscv_id.c: SOC_I_D_OFFSET handling (C2, C3)
+ * - elf_loader_mem_port_default.c: Unified address space (C6, H2, P4, future)
+ */
+
+#pragma once
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include "esp_err.h"
+#include "elf_loader_port.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief Check if SPIRAM should be preferred for code loading
+ *
+ * On chips with MEMPROT (W^X enforcement), internal RAM cannot be used
+ * for dynamic code execution. This function returns true if SPIRAM
+ * should be used instead.
+ *
+ * @return true if SPIRAM should be preferred, false otherwise
+ */
+bool elf_mem_port_prefer_spiram(void);
+
+/**
+ * @brief Initialize execution mapping after memory allocation
+ *
+ * Called after memory is allocated to set up any chip-specific mappings
+ * needed for code execution (e.g., MMU entries, address offsets).
+ *
+ * @param ram       Allocated memory base address
+ * @param size      Size of allocated memory
+ * @param[out] ctx  Memory context to populate with mapping info
+ * @return
+ *      - ESP_OK: Success (or no setup needed)
+ *      - ESP_ERR_NO_MEM: Failed to set up mapping
+ */
+esp_err_t elf_mem_port_init_exec_mapping(void *ram, size_t size,
+                                          elf_port_mem_ctx_t *ctx);
+
+/**
+ * @brief Tear down execution mapping before freeing memory
+ *
+ * Called before freeing memory to clean up any chip-specific mappings.
+ *
+ * @param ctx  Memory context with mapping info
+ */
+void elf_mem_port_deinit_exec_mapping(elf_port_mem_ctx_t *ctx);
+
+/**
+ * @brief Translate data bus address to instruction bus address
+ *
+ * Converts an address in the data address space to the corresponding
+ * address in the instruction address space for code execution.
+ *
+ * @param ctx       Memory context with mapping info
+ * @param data_addr Address in data address space
+ * @return Address suitable for instruction fetch
+ */
+uintptr_t elf_mem_port_to_exec_addr(const elf_port_mem_ctx_t *ctx,
+                                     uintptr_t data_addr);
+
+#ifdef __cplusplus
+}
+#endif
