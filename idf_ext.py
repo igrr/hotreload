@@ -77,7 +77,7 @@ class WatchOptions:
                     # Build
                     yellow_print("[hotreload] Building...")
                     result = subprocess.run(
-                        ["idf.py", "build"],
+                        ["idf.py", "-B", str(build_dir), "build"],
                         cwd=project,
                         capture_output=True,
                     )

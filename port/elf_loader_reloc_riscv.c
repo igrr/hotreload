@@ -147,6 +147,14 @@ static void patch_plt_for_iram(elf_parser_handle_t parser, void *ram_base, uintp
 }
 #endif  /* SOC_I_D_OFFSET */
 
+/* Storage for PCREL_HI20 targets, used by PCREL_LO12 relocations */
+#define MAX_PCREL_HI20_ENTRIES 32
+static struct {
+    uintptr_t auipc_vma;      /* VMA of the AUIPC instruction */
+    int32_t pcrel_offset;     /* The calculated PC-relative offset */
+} s_pcrel_hi20_table[MAX_PCREL_HI20_ENTRIES];
+static int s_pcrel_hi20_count = 0;
+
 esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                                      void *ram_base,
                                      uintptr_t load_base,
@@ -156,6 +164,9 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
 {
     (void)ram_base;  /* Used via load_base */
     (void)mem_ctx;   /* I/D offset is compile-time on RISC-V */
+
+    /* Reset PCREL_HI20 table for this load */
+    s_pcrel_hi20_count = 0;
 
     /* Iterate through RELA relocations */
     elf_iterator_handle_t it;
@@ -243,6 +254,15 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 int32_t pcrel_offset = (int32_t)(sym_addr - pc_addr);
 #endif
 
+                /* Store for corresponding PCREL_LO12 relocations */
+                if (s_pcrel_hi20_count < MAX_PCREL_HI20_ENTRIES) {
+                    s_pcrel_hi20_table[s_pcrel_hi20_count].auipc_vma = offset;
+                    s_pcrel_hi20_table[s_pcrel_hi20_count].pcrel_offset = pcrel_offset;
+                    s_pcrel_hi20_count++;
+                } else {
+                    ESP_LOGW(TAG, "PCREL_HI20 table full, LO12 relocations may fail");
+                }
+
                 /* Add 0x800 to compensate for sign-extension in LO12 */
                 int32_t hi20 = (pcrel_offset + 0x800) >> 12;
 
@@ -261,19 +281,25 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 /* PC-relative LO12 for I-type instructions (loads, addi, etc.)
                  *
                  * This relocation references a corresponding PCREL_HI20 relocation.
-                 * The symbol points to the AUIPC instruction, and we extract the
-                 * low 12 bits from the same calculation. */
+                 * The symbol points to the AUIPC instruction, and we need to use
+                 * the same pcrel_offset that was calculated for that HI20. */
                 uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
-                /* sym_val is the address of the AUIPC instruction this refers to */
-                uintptr_t auipc_addr = load_base + sym_val;
-                uintptr_t target_addr = auipc_addr + addend;  /* The actual data target */
+                /* sym_val is the VMA of the AUIPC instruction this refers to */
 
-#ifdef SOC_I_D_OFFSET
-                /* Same IRAM/DRAM adjustment as HI20 */
-                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr - SOC_I_D_OFFSET);
-#else
-                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr);
-#endif
+                /* Look up the pcrel_offset from the corresponding HI20 */
+                int32_t pcrel_offset = 0;
+                bool found = false;
+                for (int i = 0; i < s_pcrel_hi20_count; i++) {
+                    if (s_pcrel_hi20_table[i].auipc_vma == sym_val) {
+                        pcrel_offset = s_pcrel_hi20_table[i].pcrel_offset;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    ESP_LOGW(TAG, "R_RISCV_PCREL_LO12_I: no HI20 found for AUIPC at VMA 0x%x", sym_val);
+                    break;
+                }
 
                 /* Calculate lo12 (compensate for hi20 rounding) */
                 int32_t hi20 = (pcrel_offset + 0x800) >> 12;
@@ -286,7 +312,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 *(uint32_t *)location = instr;
 
                 applied_count++;
-                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_I: offset=0x%x lo12=0x%x", offset, lo12 & 0xFFF);
+                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_I: offset=0x%x auipc=0x%x lo12=0x%x", offset, sym_val, lo12 & 0xFFF);
                 break;
             }
 
@@ -294,14 +320,22 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 /* PC-relative LO12 for S-type instructions (stores)
                  * Same calculation as LO12_I but different immediate encoding */
                 uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
-                uintptr_t auipc_addr = load_base + sym_val;
-                uintptr_t target_addr = auipc_addr + addend;
+                /* sym_val is the VMA of the AUIPC instruction this refers to */
 
-#ifdef SOC_I_D_OFFSET
-                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr - SOC_I_D_OFFSET);
-#else
-                int32_t pcrel_offset = (int32_t)(target_addr - auipc_addr);
-#endif
+                /* Look up the pcrel_offset from the corresponding HI20 */
+                int32_t pcrel_offset = 0;
+                bool found = false;
+                for (int i = 0; i < s_pcrel_hi20_count; i++) {
+                    if (s_pcrel_hi20_table[i].auipc_vma == sym_val) {
+                        pcrel_offset = s_pcrel_hi20_table[i].pcrel_offset;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    ESP_LOGW(TAG, "R_RISCV_PCREL_LO12_S: no HI20 found for AUIPC at VMA 0x%x", sym_val);
+                    break;
+                }
 
                 int32_t hi20 = (pcrel_offset + 0x800) >> 12;
                 int32_t lo12 = pcrel_offset - (hi20 << 12);
