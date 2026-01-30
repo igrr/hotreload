@@ -1,0 +1,9 @@
+# ESP32-S3 QEMU-specific configuration
+# This file overrides esp32s3 settings for QEMU emulation
+
+# Use UART console instead of USB Serial/JTAG (QEMU doesn't support USB JTAG)
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
+
+# Disable PSRAM (not reliably supported in QEMU)
+CONFIG_SPIRAM=n

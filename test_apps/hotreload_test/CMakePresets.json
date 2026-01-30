@@ -75,7 +75,7 @@
             "cacheVariables": {
                 "IDF_TARGET": "esp32s3",
                 "SDKCONFIG": "${sourceDir}/build/esp32s3-qemu/sdkconfig",
-                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s3;${sourceDir}/sdkconfig.defaults.qemu"
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s3;${sourceDir}/sdkconfig.defaults.qemu;${sourceDir}/sdkconfig.defaults.esp32s3.qemu"
             }
         },
         {

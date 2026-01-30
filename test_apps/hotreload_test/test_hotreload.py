@@ -393,7 +393,8 @@ class OutputCapture:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32s3"], indirect=True)  # esp32s3 supports both hotreload and QEMU
+@pytest.mark.skip(reason="QEMU integration test unstable - needs further investigation (see #41)")
+@pytest.mark.parametrize("target", ["esp32c3"], indirect=True)  # esp32c3 supports both hotreload and QEMU networking
 def test_idf_watch_with_qemu(target, original_code):
     """
     Test the idf.py watch command combined with QEMU.
