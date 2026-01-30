@@ -181,9 +181,14 @@ function(hotreload_setup)
     # Build the reloadable ELF (first pass - to extract symbols)
     add_library(${elf_target} SHARED ${HREG_SRCS})
 
-    # Copy include directories from the component target
+    # Copy build properties from the component target to the ELF target
+    # This ensures INTERFACE properties from required components are inherited
     target_include_directories(${elf_target} PRIVATE
         $<TARGET_PROPERTY:${COMPONENT_LIB},INCLUDE_DIRECTORIES>)
+    target_compile_definitions(${elf_target} PRIVATE
+        $<TARGET_PROPERTY:${COMPONENT_LIB},COMPILE_DEFINITIONS>)
+    target_compile_options(${elf_target} PRIVATE
+        $<TARGET_PROPERTY:${COMPONENT_LIB},COMPILE_OPTIONS>)
 
     set_target_properties(${elf_target} PROPERTIES LINK_FLAGS "-nostdlib")
     set_target_properties(${elf_target} PROPERTIES LINK_LIBRARIES "")
@@ -226,6 +231,10 @@ function(hotreload_setup)
     add_library(${elf_final_target} SHARED ${HREG_SRCS})
     target_include_directories(${elf_final_target} PRIVATE
         $<TARGET_PROPERTY:${COMPONENT_LIB},INCLUDE_DIRECTORIES>)
+    target_compile_definitions(${elf_final_target} PRIVATE
+        $<TARGET_PROPERTY:${COMPONENT_LIB},COMPILE_DEFINITIONS>)
+    target_compile_options(${elf_final_target} PRIVATE
+        $<TARGET_PROPERTY:${COMPONENT_LIB},COMPILE_OPTIONS>)
     set_target_properties(${elf_final_target} PROPERTIES LINK_LIBRARIES "")
     target_link_options(${elf_final_target} PRIVATE
         "-nostdlib"
