@@ -1111,6 +1111,56 @@ TEST_CASE("loaded reloadable_hello can be called", "[elf_loader][call]")
     esp_partition_munmap(mmap_handle);
 }
 
+// Test that compile definitions from required components are propagated
+// This verifies the fix for issue #43
+TEST_CASE("compile definitions are propagated to reloadable component", "[elf_loader][call][compile_defs]")
+{
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
+    TEST_ASSERT_NOT_NULL(partition);
+
+    esp_partition_mmap_handle_t mmap_handle;
+    const void *mmap_ptr;
+    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
+                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    elf_loader_ctx_t ctx;
+
+    // Full loading workflow
+    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_allocate(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_load_sections(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_apply_relocations(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    err = elf_loader_sync_cache(&ctx);
+    TEST_ASSERT_EQUAL(ESP_OK, err);
+
+    // Get the function that returns the compile definition value
+    typedef int (*get_def_fn_t)(void);
+    get_def_fn_t get_def_fn = (get_def_fn_t)elf_loader_get_symbol(&ctx, "reloadable_get_compile_def_value");
+    TEST_ASSERT_NOT_NULL_MESSAGE(get_def_fn, "reloadable_get_compile_def_value not found");
+
+    // Call it and verify it returns the expected value (42)
+    // This value comes from test_defs component's INTERFACE compile definition
+    int value = get_def_fn();
+    TEST_ASSERT_EQUAL_MESSAGE(42, value,
+        "Compile definition not propagated: expected TEST_COMPILE_DEF_VALUE=42");
+
+    elf_loader_cleanup(&ctx);
+    esp_partition_munmap(mmap_handle);
+}
+
 // ============================================================================
 // High-level API tests - hotreload_load()
 // ============================================================================
