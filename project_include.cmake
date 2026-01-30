@@ -5,6 +5,20 @@
 # Store the path to hotreload scripts directory
 set(HOTRELOAD_SCRIPTS_DIR "${CMAKE_CURRENT_LIST_DIR}/scripts")
 
+# Check that at most one reloadable component is specified
+# Multiple reloadable components are not yet supported (see issue #42)
+if(DEFINED CONFIG_HOTRELOAD_COMPONENTS AND NOT "${CONFIG_HOTRELOAD_COMPONENTS}" STREQUAL "")
+    string(REPLACE ";" ";" _hotreload_component_list "${CONFIG_HOTRELOAD_COMPONENTS}")
+    list(LENGTH _hotreload_component_list _hotreload_component_count)
+    if(_hotreload_component_count GREATER 1)
+        message(FATAL_ERROR
+            "Multiple reloadable components are not yet supported.\n"
+            "CONFIG_HOTRELOAD_COMPONENTS contains ${_hotreload_component_count} components: ${CONFIG_HOTRELOAD_COMPONENTS}\n"
+            "Please specify only one component. See https://gitlab.espressif.cn:6688/igrokhotkov/hotreload/-/issues/42"
+        )
+    endif()
+endif()
+
 # Generate a dummy source file for reloadable components
 # This is created once and reused by all reloadable components
 set(HOTRELOAD_DUMMY_SRC "${CMAKE_BINARY_DIR}/hotreload_dummy.c")
