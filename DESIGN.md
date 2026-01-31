@@ -17,6 +17,7 @@ The application is built into two parts: main firmware and the reloadable librar
   - If the reloadable part defines global static variables, the main firmware can't access them directly.
   - If the header file of the reloadable part defines data structures or enums used in the main program, the main program has to be rebuilt.
   - If the function signatures of public functions of the reloadable part change, the main program has to be rebuilt.
+- Reload must only be triggered when no reloadable functions are on any task's call stack. This is the application developer's responsibility to ensure.
 
 Generally, these limitations are acceptable for the above mentioned use case, provided that the reloadable part is encapsulated.
 
@@ -129,9 +130,3 @@ void app_main(void) {
     }
 }
 ```
-
-### Key Constraint
-
-**Reload must only be triggered when no reloadable functions are on any task's call stack.** This is the application developer's responsibility to ensure.
-
-This is an additional constraint beyond those listed in [Key constraints](#key-constraints).

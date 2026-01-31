@@ -264,7 +264,7 @@ When a component uses the `RELOADABLE` keyword (or is listed in `CONFIG_HOTRELOA
 - Main firmware can only call **functions** in reloadable code (not access global variables)
 - Changes to function signatures or data structures require main firmware rebuild
 - Reloadable code can call main firmware functions at fixed addresses
-- **Cooperative reload**: Reload must only be triggered when no reloadable functions are on any task's call stack. See the [HTTP Server](#http-server-for-ota-reload) example for the safe reload pattern.
+- Reload must only be triggered when no reloadable functions are on any task's call stack (see [HTTP Server](#http-server-for-ota-reload) for the safe reload pattern)
 
 ## Example Project
 
