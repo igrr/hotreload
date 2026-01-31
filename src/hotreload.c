@@ -22,6 +22,7 @@ static elf_loader_ctx_t s_loader_ctx;
 static esp_partition_mmap_handle_t s_mmap_handle;
 static bool s_is_loaded = false;
 static bool s_loaded_from_buffer = false;  // True if loaded from RAM buffer (no mmap)
+static bool s_update_pending = false;      // Set when partition is updated, cleared on load
 
 // Hook state
 static hotreload_hook_fn_t s_pre_hook = NULL;
@@ -149,9 +150,15 @@ esp_err_t hotreload_load(const hotreload_config_t *config)
 
     s_is_loaded = true;
     s_loaded_from_buffer = false;
+    s_update_pending = false;  // Clear pending flag after successful load
     ESP_LOGI(TAG, "Loaded reloadable ELF from partition '%s'", config->partition_label);
 
     return ESP_OK;
+}
+
+bool hotreload_update_available(void)
+{
+    return s_update_pending;
 }
 
 esp_err_t hotreload_unload(void)
@@ -171,6 +178,7 @@ esp_err_t hotreload_unload(void)
     s_mmap_handle = 0;
     s_is_loaded = false;
     s_loaded_from_buffer = false;
+    // Note: don't clear s_update_pending here - it tracks partition state, not load state
 
     ESP_LOGI(TAG, "Unloaded reloadable ELF");
 
@@ -195,6 +203,7 @@ esp_err_t hotreload_load_from_buffer(const void *elf_data, size_t elf_size)
 
     s_is_loaded = true;
     s_loaded_from_buffer = true;
+    s_update_pending = false;  // Clear pending flag after successful load
     ESP_LOGI(TAG, "Loaded reloadable ELF from buffer (%d bytes)", (int)elf_size);
 
     return ESP_OK;
@@ -236,6 +245,7 @@ esp_err_t hotreload_update_partition(const char *partition_label,
         return err;
     }
 
+    s_update_pending = true;  // Mark that an update is available
     ESP_LOGI(TAG, "Updated partition '%s' with %d bytes", partition_label, (int)elf_size);
     return ESP_OK;
 }

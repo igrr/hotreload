@@ -14,16 +14,21 @@ static const char *TAG = "app_main";
 /**
  * Integration test case for hot reload HTTP server.
  *
- * This test case:
- * 1. Initializes networking (using openeth in QEMU)
- * 2. Loads the initial reloadable ELF
- * 3. Starts the HTTP server for hot reload
- * 4. Runs in a loop, waiting for reload commands
+ * This test demonstrates the COOPERATIVE RELOAD pattern:
+ * 1. Initialize networking and load the initial ELF
+ * 2. Start the HTTP server (receives uploads but does NOT auto-reload)
+ * 3. In main loop: call reloadable code, then check for updates at safe points
+ * 4. Reload only when no reloadable code is on the call stack
+ *
+ * IMPORTANT: Reload must only happen at safe points where no reloadable
+ * functions are on the call stack. If a reload happens while reloadable
+ * code is executing, the application will crash when that code returns.
  *
  * The external pytest test (test_hotreload_e2e.py) will:
  * - Wait for server to start
  * - Modify and rebuild the reloadable code
- * - Send the new ELF via HTTP
+ * - Send the new ELF via HTTP (upload only, no auto-reload)
+ * - Wait for the app to detect the update and reload
  * - Verify the reload succeeded
  */
 TEST_CASE("hotreload_integration", "[integration]")
@@ -59,17 +64,40 @@ TEST_CASE("hotreload_integration", "[integration]")
     reloadable_hello("from initial load");
 
     // Start the HTTP server for hot reload
+    // Note: The server only receives uploads - it does NOT trigger reload.
+    // The application must poll hotreload_update_available() and reload at safe points.
     hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
     ret = hotreload_server_start(&server_config);
     TEST_ASSERT_EQUAL(ESP_OK, ret);
     ESP_LOGI(TAG, "Hotreload server started on port 8080");
-    ESP_LOGI(TAG, "Ready for hot reload updates!");
+    ESP_LOGI(TAG, "Ready for hot reload updates (cooperative reload enabled)");
 
-    // Keep running - the HTTP server runs in background
-    // The pytest test will interact with the server and verify results
-    for (int i = 0; i < 60; i++) {  // Run for up to 10 minutes (60 * 10s)
-        vTaskDelay(pdMS_TO_TICKS(10000));
-        ESP_LOGI(TAG, "Main loop running, waiting for updates...");
+    // Main loop demonstrating cooperative reload pattern
+    for (int i = 0; i < 600; i++) {  // Run for up to 10 minutes (600 * 1s)
+        // === STEP 1: Do work with reloadable code ===
+        // All reloadable function calls happen here.
+        // After this block completes, no reloadable code is on the stack.
+        reloadable_hello("from main loop");
+
+        // === STEP 2: Check for updates at SAFE POINT ===
+        // This is safe because we're not inside any reloadable function.
+        // The call stack only contains main app code at this point.
+        if (hotreload_update_available()) {
+            ESP_LOGI(TAG, "Update detected! Reloading at safe point...");
+            ret = hotreload_reload(&config);
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "Reload successful! Calling updated code:");
+                reloadable_init();
+                reloadable_hello("after reload");
+            } else {
+                ESP_LOGE(TAG, "Reload failed: %d", ret);
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if ((i % 10) == 0) {
+            ESP_LOGI(TAG, "Main loop iteration %d, waiting for updates...", i);
+        }
     }
 
     ESP_LOGI(TAG, "Integration test complete (timeout)");

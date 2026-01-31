@@ -101,9 +101,9 @@ def run_idf_reload(url: str) -> subprocess.CompletedProcess:
     return result
 
 
-def upload_and_reload(port: int) -> requests.Response:
-    """Upload the new ELF and trigger reload."""
-    url = f"http://127.0.0.1:{port}/upload-and-reload"
+def upload_elf(port: int) -> requests.Response:
+    """Upload the new ELF (reload happens via cooperative polling in app)."""
+    url = f"http://127.0.0.1:{port}/upload"
 
     with open(RELOADABLE_ELF, "rb") as f:
         elf_data = f.read()
@@ -218,14 +218,14 @@ def test_hot_reload_e2e(dut, original_code):
     rebuild_reloadable()
     print("  Build successful!")
 
-    # Step 6: Upload and reload
-    print("Step 6: Uploading new ELF and triggering reload...")
-    response = upload_and_reload(SERVER_PORT)
+    # Step 6: Upload ELF (app will reload via cooperative polling)
+    print("Step 6: Uploading new ELF...")
+    response = upload_elf(SERVER_PORT)
     print(f"  Server response: {response.status_code} - {response.text.strip()}")
     assert response.status_code == 200, f"Upload failed: {response.text}"
 
-    # Step 7: Verify reload
-    print("Step 7: Verifying reload succeeded...")
+    # Step 7: Verify reload (app polls and reloads at safe point)
+    print("Step 7: Waiting for app to detect update and reload...")
 
     # Wait for reload complete message
     dut.expect("Reload complete", timeout=30)
@@ -312,11 +312,11 @@ def test_idf_reload_command(dut, original_code):
         print(f"  stderr:\n{result.stderr}")
 
     assert result.returncode == 0, f"idf.py reload failed: {result.stderr}"
-    assert "Reload successful!" in result.stdout, "Expected success message not found"
-    print("  idf.py reload completed successfully!")
+    assert "Upload complete!" in result.stdout, "Expected success message not found"
+    print("  idf.py reload (upload) completed successfully!")
 
-    # Step 6: Verify reload on device
-    print("Step 6: Verifying reload succeeded on device...")
+    # Step 6: Verify reload on device (app polls and reloads at safe point)
+    print("Step 6: Waiting for app to detect update and reload...")
     dut.expect("Reload complete", timeout=30)
     print("  Reload complete message received!")
 
@@ -493,10 +493,10 @@ def test_idf_watch_with_qemu(target, original_code):
             "Build should succeed"
         print("  Build successful!")
 
-        print("Step 9: Waiting for upload and reload...")
-        assert capture.wait_for_stderr(r"\[hotreload\] Reload successful", timeout=30), \
-            "Reload should succeed"
-        print("  Reload successful!")
+        print("Step 9: Waiting for upload...")
+        assert capture.wait_for_stderr(r"\[hotreload\] Upload complete", timeout=30), \
+            "Upload should succeed"
+        print("  Upload complete!")
 
         # Step 10: Verify device received reload
         print("Step 10: Verifying device received reload...")
@@ -637,9 +637,9 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     rebuild_reloadable()
     print("  Build successful!")
 
-    # Step 6: Upload and reload
-    print("Step 6: Uploading new ELF and triggering reload...")
-    url = f"{device_url}/upload-and-reload"
+    # Step 6: Upload ELF (app will reload via cooperative polling)
+    print("Step 6: Uploading new ELF...")
+    url = f"{device_url}/upload"
     with open(RELOADABLE_ELF, "rb") as f:
         elf_data = f.read()
     print(f"  Uploading {len(elf_data)} bytes to {url}")
@@ -652,8 +652,8 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     print(f"  Server response: {response.status_code} - {response.text.strip()}")
     assert response.status_code == 200, f"Upload failed: {response.text}"
 
-    # Step 7: Verify reload
-    print("Step 7: Verifying reload succeeded...")
+    # Step 7: Verify reload (app polls and reloads at safe point)
+    print("Step 7: Waiting for app to detect update and reload...")
     dut.expect("Reload complete", timeout=30)
     print("  Reload complete message received!")
 
@@ -729,11 +729,11 @@ def test_idf_reload_command_hardware(dut, original_code):
         print(f"  stderr:\n{result.stderr}")
 
     assert result.returncode == 0, f"idf.py reload failed: {result.stderr}"
-    assert "Reload successful!" in result.stdout, "Expected success message not found"
-    print("  idf.py reload completed successfully!")
+    assert "Upload complete!" in result.stdout, "Expected success message not found"
+    print("  idf.py reload (upload) completed successfully!")
 
-    # Step 6: Verify reload on device
-    print("Step 6: Verifying reload succeeded on device...")
+    # Step 6: Verify reload on device (app polls and reloads at safe point)
+    print("Step 6: Waiting for app to detect update and reload...")
     dut.expect("Reload complete", timeout=30)
     print("  Reload complete message received!")
 

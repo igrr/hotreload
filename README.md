@@ -138,7 +138,7 @@ Or use the HTTP server for over-the-air updates (see below).
 
 ## HTTP Server for OTA Reload
 
-Start the HTTP server to enable over-the-air updates:
+Start the HTTP server to enable over-the-air updates. The server uses a **cooperative reload** model: it receives uploads but does NOT automatically trigger reload. Your application must poll for updates and reload at safe points.
 
 ```c
 #include "hotreload.h"
@@ -146,15 +146,27 @@ Start the HTTP server to enable over-the-air updates:
 void app_main(void) {
     // Initialize WiFi first...
 
-    // Start HTTP server
-    hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
-    esp_err_t err = hotreload_server_start(&server_config);
-    if (err != ESP_OK) {
-        printf("Server failed: %s\n", esp_err_to_name(err));
-        return;
-    }
+    // Load initial code
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+    hotreload_load(&config);
 
-    printf("Hot reload server running on port 8080\n");
+    // Start HTTP server (receives uploads, does NOT auto-reload)
+    hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
+    hotreload_server_start(&server_config);
+
+    // Main loop with cooperative reload
+    while (1) {
+        // Call reloadable functions
+        reloadable_do_work();
+
+        // Check for updates at safe point (no reloadable code on stack)
+        if (hotreload_update_available()) {
+            printf("Update available, reloading...\n");
+            hotreload_reload(&config);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
 ```
 
@@ -163,8 +175,7 @@ void app_main(void) {
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/upload` | POST | Upload ELF file to flash partition |
-| `/reload` | POST | Reload from flash partition |
-| `/upload-and-reload` | POST | Upload and reload in one request |
+| `/pending` | GET | Check if an update is pending reload |
 | `/status` | GET | Check server status |
 
 ### Upload with curl
@@ -173,9 +184,12 @@ void app_main(void) {
 # Build the reloadable ELF
 idf.py build
 
-# Upload and reload
-curl -X POST -F "file=@build/reloadable_stripped.so" \
-    http://192.168.1.100:8080/upload-and-reload
+# Upload (reload happens when app polls hotreload_update_available())
+curl -X POST --data-binary @build/esp-idf/reloadable/libreloadable_stripped.so \
+    http://192.168.1.100:8080/upload
+
+# Check if update is pending
+curl http://192.168.1.100:8080/pending
 ```
 
 ### Using idf.py Commands
@@ -250,6 +264,7 @@ When a component uses the `RELOADABLE` keyword (or is listed in `CONFIG_HOTRELOA
 - Main firmware can only call **functions** in reloadable code (not access global variables)
 - Changes to function signatures or data structures require main firmware rebuild
 - Reloadable code can call main firmware functions at fixed addresses
+- Reload must only be triggered when no reloadable functions are on any task's call stack (see [HTTP Server](#http-server-for-ota-reload) for the safe reload pattern)
 
 ## Example Project
 

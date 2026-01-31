@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -89,6 +90,45 @@ esp_err_t hotreload_load(const hotreload_config_t *config);
  *      - ESP_ERR_INVALID_STATE: No ELF currently loaded
  */
 esp_err_t hotreload_unload(void);
+
+/**
+ * @brief Check if an update is available for reload
+ *
+ * Returns true if hotreload_update_partition() was called since the last
+ * hotreload_load() or hotreload_reload(). Use this to implement cooperative
+ * reload: poll this function at safe points in your application (when no
+ * reloadable code is on the call stack), and call hotreload_reload() when
+ * it returns true.
+ *
+ * Example usage:
+ * @code
+ * void app_main(void) {
+ *     hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+ *     hotreload_load(&config);
+ *
+ *     while (1) {
+ *         // Do work with reloadable code
+ *         reloadable_process();
+ *
+ *         // Check for updates at a safe point (outside reloadable code)
+ *         if (hotreload_update_available()) {
+ *             ESP_LOGI(TAG, "Update available, reloading...");
+ *             hotreload_reload(&config);
+ *         }
+ *
+ *         vTaskDelay(pdMS_TO_TICKS(100));
+ *     }
+ * }
+ * @endcode
+ *
+ * @note This function is safe to call from any context and does not
+ *       trigger a reload. It only checks if new code is available.
+ *
+ * @return
+ *      - true: New ELF was written to partition since last load
+ *      - false: No update pending
+ */
+bool hotreload_update_available(void);
 
 /**
  * @brief Load a reloadable ELF from a RAM buffer

@@ -103,10 +103,10 @@ class WatchOptions:
                         continue
 
                     yellow_print(f"[hotreload] Uploading {elf_path.name}...")
-                    if _upload_and_reload(url, elf_path, verbose):
-                        yellow_print("[hotreload] Reload successful!")
+                    if _upload_elf(url, elf_path, verbose):
+                        yellow_print("[hotreload] Upload complete (app will reload at next safe point)")
                     else:
-                        yellow_print("[hotreload] Reload FAILED!")
+                        yellow_print("[hotreload] Upload FAILED!")
 
                 self._stop_event.wait(poll_interval)
 
@@ -152,9 +152,9 @@ def _find_reloadable_elf(build_dir: Path) -> Optional[Path]:
     return None
 
 
-def _upload_and_reload(url: str, elf_path: Path, verbose: bool = False) -> bool:
-    """Upload ELF to device and trigger reload."""
-    endpoint = f"{url.rstrip('/')}/upload-and-reload"
+def _upload_elf(url: str, elf_path: Path, verbose: bool = False) -> bool:
+    """Upload ELF to device (reload happens via cooperative polling in app)."""
+    endpoint = f"{url.rstrip('/')}/upload"
 
     if verbose:
         print(f"Uploading {elf_path.name} to {endpoint}...")
@@ -412,10 +412,11 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
         # Upload and reload
         print(f"Uploading {elf_path.name} to {url}...")
 
-        if _upload_and_reload(url, elf_path, verbose):
-            print("Reload successful!")
+        if _upload_elf(url, elf_path, verbose):
+            print("Upload complete!")
+            print("(App will reload at next safe point via hotreload_update_available())")
         else:
-            print("Reload failed!")
+            print("Upload failed!")
             sys.exit(1)
 
     def watch_callback(
@@ -532,10 +533,10 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
                         continue
 
                     print(f"Uploading {elf_path.name}...")
-                    if _upload_and_reload(url, elf_path, verbose):
-                        print("Reload successful!")
+                    if _upload_elf(url, elf_path, verbose):
+                        print("Upload complete (app will reload at next safe point)")
                     else:
-                        print("Reload FAILED!")
+                        print("Upload FAILED!")
 
                     print("\nWaiting for changes...")
 
@@ -550,16 +551,18 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
         "actions": {
             "reload": {
                 "callback": reload_callback,
-                "short_help": "Build and reload ELF module on device",
+                "short_help": "Build and upload ELF module to device",
                 "help": (
                     "Build the reloadable ELF module and send it to the device "
-                    "over HTTP for live reload without reflashing.\n\n"
+                    "over HTTP.\n\n"
                     "This command:\n"
                     "1. Runs an incremental build\n"
                     "2. Checks if the main app binary changed\n"
                     "3. Warns if a full reflash is needed\n"
                     "4. Uploads the reloadable ELF via HTTP\n\n"
-                    "The device must be running the hotreload HTTP server."
+                    "The device must be running the hotreload HTTP server.\n"
+                    "The actual reload happens when the app polls\n"
+                    "hotreload_update_available() at a safe point."
                 ),
                 "options": [
                     {

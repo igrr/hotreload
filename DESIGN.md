@@ -17,6 +17,7 @@ The application is built into two parts: main firmware and the reloadable librar
   - If the reloadable part defines global static variables, the main firmware can't access them directly.
   - If the header file of the reloadable part defines data structures or enums used in the main program, the main program has to be rebuilt.
   - If the function signatures of public functions of the reloadable part change, the main program has to be rebuilt.
+- Reload must only be triggered when no reloadable functions are on any task's call stack. This is the application developer's responsibility to ensure.
 
 Generally, these limitations are acceptable for the above mentioned use case, provided that the reloadable part is encapsulated.
 
@@ -86,3 +87,46 @@ To reload code:
 2. Re-parse the ELF to find new symbol addresses
 3. Update the symbol table with new addresses
 4. All subsequent calls now execute the new code
+
+## Cooperative Reload Safety Model
+
+### The Problem
+
+A reload operation frees the memory containing the old reloadable code and loads new code to a (potentially different) memory location. If any reloadable function is on the call stack when this happens, the application will crash:
+
+- **Return addresses become invalid**: When a reloadable function returns, it jumps to the return address on the stack, which now points to freed memory.
+- **Code execution in freed memory**: If a task is preempted while executing reloadable code, it will resume execution in freed/invalid memory.
+- **Access to .rodata crashes**: String literals and constants in the reloadable module become invalid.
+
+### The Solution: Cooperative Reload
+
+The hot reload system uses a **cooperative reload** model:
+
+1. **HTTP server receives updates but does NOT automatically reload**. When new code is uploaded via `POST /upload`, it is written to flash but no reload is triggered.
+
+2. **Application polls for updates at safe points**. The main application loop checks `hotreload_update_available()` and calls `hotreload_reload()` only when no reloadable code is on the call stack.
+
+3. **Reload happens only when safe**. Since the application controls when reload occurs, it can ensure all reloadable function calls have completed.
+
+### Safe Reload Pattern
+
+```c
+void app_main(void) {
+    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
+    hotreload_load(&config);
+
+    while (1) {
+        // STEP 1: Call reloadable functions
+        // All reloadable code executes here
+        reloadable_do_work();
+
+        // STEP 2: Check for updates at SAFE POINT
+        // No reloadable functions are on the stack here
+        if (hotreload_update_available()) {
+            hotreload_reload(&config);  // Safe to reload now
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+```
