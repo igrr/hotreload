@@ -86,47 +86,16 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-// POST /reload handler - triggers reload
-static esp_err_t reload_post_handler(httpd_req_t *req)
+// GET /pending handler - check if an update is pending
+static esp_err_t pending_get_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "Reload requested");
+    bool pending = hotreload_update_available();
 
-    hotreload_config_t config = {
-        .partition_label = s_config.partition_label,
-    };
-
-    esp_err_t err = hotreload_reload(&config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Reload failed: %d", err);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Reload failed");
-        return ESP_FAIL;
-    }
-
-    httpd_resp_set_type(req, "text/plain");
-    httpd_resp_sendstr(req, "OK: Reload complete\n");
-
-    return ESP_OK;
-}
-
-// POST /upload-and-reload handler - upload and reload in one request
-static esp_err_t upload_and_reload_post_handler(httpd_req_t *req)
-{
-    // First upload
-    esp_err_t err = upload_post_handler(req);
-    if (err != ESP_OK) {
-        return err;  // Error already sent
-    }
-
-    // Then reload
-    hotreload_config_t config = {
-        .partition_label = s_config.partition_label,
-    };
-
-    err = hotreload_reload(&config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Reload failed: %d", err);
-        // Can't send error - already sent OK for upload
-        return ESP_FAIL;
+    httpd_resp_set_type(req, "application/json");
+    if (pending) {
+        httpd_resp_sendstr(req, "{\"pending\":true}\n");
+    } else {
+        httpd_resp_sendstr(req, "{\"pending\":false}\n");
     }
 
     return ESP_OK;
@@ -182,16 +151,10 @@ esp_err_t hotreload_server_start(const hotreload_server_config_t *config)
         .handler = upload_post_handler,
     };
 
-    static const httpd_uri_t reload_uri = {
-        .uri = "/reload",
-        .method = HTTP_POST,
-        .handler = reload_post_handler,
-    };
-
-    static const httpd_uri_t upload_reload_uri = {
-        .uri = "/upload-and-reload",
-        .method = HTTP_POST,
-        .handler = upload_and_reload_post_handler,
+    static const httpd_uri_t pending_uri = {
+        .uri = "/pending",
+        .method = HTTP_GET,
+        .handler = pending_get_handler,
     };
 
     static const httpd_uri_t status_uri = {
@@ -201,15 +164,13 @@ esp_err_t hotreload_server_start(const hotreload_server_config_t *config)
     };
 
     httpd_register_uri_handler(s_server, &upload_uri);
-    httpd_register_uri_handler(s_server, &reload_uri);
-    httpd_register_uri_handler(s_server, &upload_reload_uri);
+    httpd_register_uri_handler(s_server, &pending_uri);
     httpd_register_uri_handler(s_server, &status_uri);
 
     ESP_LOGI(TAG, "Hotreload server started on port %d", s_config.port);
-    ESP_LOGI(TAG, "  POST /upload            - Upload ELF to flash");
-    ESP_LOGI(TAG, "  POST /reload            - Reload from flash");
-    ESP_LOGI(TAG, "  POST /upload-and-reload - Upload and reload");
-    ESP_LOGI(TAG, "  GET  /status            - Server status");
+    ESP_LOGI(TAG, "  POST /upload  - Upload ELF to flash (reload triggered by app)");
+    ESP_LOGI(TAG, "  GET  /pending - Check if update is pending");
+    ESP_LOGI(TAG, "  GET  /status  - Server status");
 
     return ESP_OK;
 }
