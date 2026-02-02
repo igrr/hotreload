@@ -30,6 +30,17 @@ bool elf_mem_port_prefer_spiram(void)
     return false;
 }
 
+bool elf_mem_port_allow_internal_ram_fallback(void)
+{
+#if CONFIG_ESP_SYSTEM_MEMPROT
+    /* Memory protection is enabled, internal RAM is not executable */
+    return false;
+#else
+    /* Default: internal RAM is executable */
+    return true;
+#endif
+}
+
 esp_err_t elf_mem_port_init_exec_mapping(void *ram, size_t size,
                                           elf_port_mem_ctx_t *ctx)
 {

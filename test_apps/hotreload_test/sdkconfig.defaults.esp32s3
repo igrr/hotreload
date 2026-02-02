@@ -10,6 +10,3 @@ CONFIG_SPIRAM_SPEED_80M=y
 
 # Allow allocating from PSRAM with heap_caps
 CONFIG_SPIRAM_USE_CAPS_ALLOC=y
-
-# Increase main task stack for test framework
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
