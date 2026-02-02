@@ -8,3 +8,6 @@ CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y
 
 # Disable task watchdog (unity_run_menu blocks on UART input)
 CONFIG_ESP_TASK_WDT_INIT=n
+
+# Increase main task stack for test framework
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

@@ -15,21 +15,23 @@
 
 #include "elf_loader_mem_port.h"
 
-#if CONFIG_IDF_TARGET_ESP32S2
-
 #include <string.h>
-#include "esp_log.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "soc/soc.h"
+
+#if CONFIG_IDF_TARGET_ESP32S2
 
 static const char *TAG = "elf_mem_s2";
 
 #if CONFIG_SPIRAM
-#include "esp_attr.h"
+#include "esp_psram.h"
 #include "esp32s2/rom/cache.h"
-#include "soc/mmu.h"
-#include "soc/extmem_reg.h"
 #include "soc/ext_mem_defs.h"
+#include "soc/extmem_reg.h"
+#include "soc/mmu.h"
 
 /* MMU configuration constants */
 #define MMU_INVALID         BIT(14)
@@ -143,24 +145,43 @@ static void IRAM_ATTR deinit_mmu(elf_port_mem_ctx_t *ctx)
 bool elf_mem_port_prefer_spiram(void)
 {
 #if CONFIG_SPIRAM
-    /* ESP32-S2 has MEMPROT, prefer SPIRAM for code loading */
-    return true;
+    /* ESP32-S2 has MEMPROT, prefer SPIRAM for code loading.
+     * Check at runtime since CONFIG_SPIRAM_IGNORE_NOT_FOUND may be set. */
+    return esp_psram_is_initialized();
 #else
     return false;
+#endif
+}
+
+bool elf_mem_port_allow_internal_ram_fallback(void)
+{
+#if CONFIG_ESP_SYSTEM_MEMPROT
+    /* Memory protection is enabled, internal RAM is not executable */
+    return false;
+#else
+    /* Memory protection is disabled, internal RAM can be used for code */
+    return true;
 #endif
 }
 
 esp_err_t elf_mem_port_init_exec_mapping(void *ram, size_t size,
                                           elf_port_mem_ctx_t *ctx)
 {
+    uintptr_t addr = (uintptr_t)ram;
+
 #if CONFIG_SPIRAM
-    if (is_psram_addr((uintptr_t)ram)) {
+    if (is_psram_addr(addr)) {
         return init_mmu(ctx, ram, size);
     }
 #endif
-    (void)ram;
+
+    /* Internal D/IRAM: apply SOC_I_D_OFFSET for instruction bus access */
+    if (esp_ptr_in_diram_dram(ram)) {
+        ctx->text_off = SOC_I_D_OFFSET;
+        ESP_LOGD(TAG, "Internal RAM: text_off=0x%lx", (unsigned long)ctx->text_off);
+    }
+
     (void)size;
-    (void)ctx;
     return ESP_OK;
 }
 
@@ -180,9 +201,14 @@ uintptr_t elf_mem_port_to_exec_addr(const elf_port_mem_ctx_t *ctx,
     if (ctx != NULL && ctx->text_off != 0 && is_psram_addr(data_addr)) {
         return data_addr + ctx->text_off;
     }
-#else
-    (void)ctx;
 #endif
+
+    /* Internal D/IRAM: apply SOC_I_D_OFFSET for instruction bus access */
+    if (esp_ptr_in_diram_dram((void *)data_addr)) {
+        return data_addr + SOC_I_D_OFFSET;
+    }
+
+    (void)ctx;
     return data_addr;
 }
 

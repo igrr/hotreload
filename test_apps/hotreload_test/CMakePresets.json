@@ -90,6 +90,17 @@
             }
         },
         {
+            "name": "esp32s2-hardware-nopsram",
+            "displayName": "ESP32-S2 Hardware (no PSRAM)",
+            "description": "ESP32-S2 build without PSRAM, memory protection disabled",
+            "binaryDir": "build/esp32s2-hardware-nopsram",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32s2",
+                "SDKCONFIG": "${sourceDir}/build/esp32s2-hardware-nopsram/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s2.nopsram;${sourceDir}/sdkconfig.defaults.hardware"
+            }
+        },
+        {
             "name": "esp32s3-hardware",
             "displayName": "ESP32-S3 Hardware",
             "description": "ESP32-S3 build for real hardware testing with PSRAM",
@@ -98,6 +109,17 @@
                 "IDF_TARGET": "esp32s3",
                 "SDKCONFIG": "${sourceDir}/build/esp32s3-hardware/sdkconfig",
                 "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s3;${sourceDir}/sdkconfig.defaults.hardware"
+            }
+        },
+        {
+            "name": "esp32s3-hardware-nopsram",
+            "displayName": "ESP32-S3 Hardware (no PSRAM)",
+            "description": "ESP32-S3 build without PSRAM, memory protection disabled",
+            "binaryDir": "build/esp32s3-hardware-nopsram",
+            "cacheVariables": {
+                "IDF_TARGET": "esp32s3",
+                "SDKCONFIG": "${sourceDir}/build/esp32s3-hardware-nopsram/sdkconfig",
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32s3.nopsram;${sourceDir}/sdkconfig.defaults.hardware"
             }
         }
     ]

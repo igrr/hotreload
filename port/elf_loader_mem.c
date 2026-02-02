@@ -59,13 +59,24 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
     } else {
         /* Default allocation strategy */
 
-        /* Check if port layer prefers SPIRAM (e.g., for MEMPROT chips) */
+        /* Check if port layer prefers SPIRAM (e.g., for MEMPROT chips).
+         * On ESP chips with SPIRAM support, check SPIRAM availability at run time. */
         if (elf_mem_port_prefer_spiram()) {
             ESP_LOGI(TAG, "Port prefers SPIRAM for code loading");
             ram = heap_caps_aligned_alloc(4, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         }
 
         if (ram == NULL) {
+            /* SPIRAM not available or allocation failed */
+            if (!elf_mem_port_allow_internal_ram_fallback()) {
+                /* Internal RAM is not executable on this chip/configuration */
+                ESP_LOGE(TAG, "Failed to allocate executable memory for ELF (%zu bytes). "
+                              "SPIRAM is required but not available. Either ensure SPIRAM "
+                              "is present with sufficient free space, or disable memory "
+                              "protection (CONFIG_ESP_SYSTEM_MEMPROT=n)", size);
+                return ESP_ERR_NOT_SUPPORTED;
+            }
+
             /* Fall back to regular 32-bit memory */
             ESP_LOGD(TAG, "Trying MALLOC_CAP_32BIT allocation");
             ram = heap_caps_aligned_alloc(4, size, MALLOC_CAP_32BIT);

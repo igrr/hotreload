@@ -47,3 +47,8 @@ idf_component_register(
         esp_partition
         esp_http_server
 )
+
+# Add esp_psram dependency for builds with SPIRAM support
+if(CONFIG_SPIRAM)
+    idf_component_optional_requires(PRIVATE esp_psram)
+endif()

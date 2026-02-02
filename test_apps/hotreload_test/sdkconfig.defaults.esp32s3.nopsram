@@ -1,0 +1,11 @@
+# ESP32-S3 configuration WITHOUT PSRAM
+# Uses internal RAM with memory protection disabled
+
+# Use USB Serial/JTAG for console (required for boards without UART bridge)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Disable PSRAM
+# CONFIG_SPIRAM is not set
+
+# Disable memory protection to allow code execution from internal RAM
+CONFIG_ESP_SYSTEM_MEMPROT=n

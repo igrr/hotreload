@@ -1,0 +1,8 @@
+# ESP32-S2 configuration WITHOUT PSRAM
+# Uses internal RAM with memory protection disabled
+
+# Disable PSRAM
+# CONFIG_SPIRAM is not set
+
+# Disable memory protection to allow code execution from internal RAM
+CONFIG_ESP_SYSTEM_MEMPROT=n

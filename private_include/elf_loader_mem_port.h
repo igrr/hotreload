@@ -37,9 +37,23 @@ extern "C" {
  * for dynamic code execution. This function returns true if SPIRAM
  * should be used instead.
  *
+ * @note On ESP32-S2/S3, this checks runtime SPIRAM availability since
+ *       CONFIG_SPIRAM_IGNORE_NOT_FOUND may be set.
+ *
  * @return true if SPIRAM should be preferred, false otherwise
  */
 bool elf_mem_port_prefer_spiram(void);
+
+/**
+ * @brief Check if internal RAM can be used for code execution
+ *
+ * Returns whether it's safe to fall back to internal RAM if SPIRAM
+ * allocation fails. On chips with MEMPROT enabled, internal RAM is
+ * not executable and this returns false.
+ *
+ * @return true if internal RAM fallback is allowed, false otherwise
+ */
+bool elf_mem_port_allow_internal_ram_fallback(void);
 
 /**
  * @brief Initialize execution mapping after memory allocation
