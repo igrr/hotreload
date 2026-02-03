@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @file hotreload_server.c
+ * @brief HTTP server for receiving ELF updates over the network
+ */
+
 #include <string.h>
 #include "hotreload.h"
 #include "esp_http_server.h"

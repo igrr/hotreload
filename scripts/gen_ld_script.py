@@ -1,4 +1,5 @@
 #! /usr/bin/env python3
+"""Linker script generator for reloadable ELF modules."""
 
 import argparse
 import subprocess

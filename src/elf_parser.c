@@ -3,6 +3,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+
+/**
+ * @file elf_parser.c
+ * @brief ELF file parsing and section/symbol iteration
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
