@@ -64,7 +64,7 @@
             "cacheVariables": {
                 "IDF_TARGET": "esp32p4",
                 "SDKCONFIG": "${sourceDir}/build/esp32p4-hardware/sdkconfig",
-                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.esp32p4;${sourceDir}/sdkconfig.defaults.hardware"
+                "SDKCONFIG_DEFAULTS": "${sourceDir}/sdkconfig.defaults;${sourceDir}/sdkconfig.defaults.hardware;${sourceDir}/sdkconfig.defaults.esp32p4"
             }
         },
         {

@@ -533,17 +533,11 @@ def get_device_ip_from_serial(dut, timeout: int = 60) -> str:
     """
     Wait for the device to print its IP address and extract it.
 
-    The device typically prints something like (protocol_examples_common):
-    - "Got IPv4 event: Interface ... address: 192.168.1.100"
-    - "- IPv4 address: 192.168.1.100,"
-    - "example_netif_eth ip: 192.168.1.100"
-    Or legacy formats:
-    - "Got IP Address: 192.168.1.100"
-    - "Static IP: 192.168.1.100"
+    The device prints (from protocol_examples_common):
+    "Got IPv4 event: Interface ... address: 192.168.1.100"
     """
-    # Wait for IP address to be printed - match multiple possible formats
     match = dut.expect(
-        r"(?:Got IP(?:v4)?(?: event:.*)?[Aa]ddress|Static IP|IPv4 address|ip)[:\s]+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
+        r"Got IPv4 event:.*address:\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
         timeout=timeout
     )
     ip_address = match.group(1).decode() if isinstance(match.group(1), bytes) else match.group(1)
