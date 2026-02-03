@@ -5,6 +5,7 @@ build/
 __pycache__/
 sdkconfig
 sdkconfig.old
+sdkconfig.local
 dependencies.lock
 managed_components/
 doxygen/
