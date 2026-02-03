@@ -80,7 +80,25 @@ Follow TDD principles for new features:
 
 ### Running Tests
 
-**Using CMake presets and pytest (recommended):**
+**Run all tests with the test runner script (recommended for CI/full validation):**
+
+```bash
+# Run everything: clean, build all presets, run hardware + QEMU tests
+python scripts/run_all_tests.py
+
+# Common options:
+python scripts/run_all_tests.py --no-clean         # Keep existing builds
+python scripts/run_all_tests.py --no-build         # Skip building, use existing
+python scripts/run_all_tests.py --build-only       # Only build, no tests
+python scripts/run_all_tests.py --no-hardware      # Skip hardware tests
+python scripts/run_all_tests.py --no-qemu          # Skip QEMU tests
+python scripts/run_all_tests.py --list-devices     # List connected ESP devices
+python scripts/run_all_tests.py --target esp32c3   # Only build/test esp32c3
+python scripts/run_all_tests.py -k unit            # Only run unit tests
+python scripts/run_all_tests.py -k "unit or e2e"   # Run unit and e2e tests
+```
+
+**Using CMake presets and pytest (for individual test runs):**
 
 ```bash
 cd test_apps/hotreload_test
