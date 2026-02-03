@@ -7,9 +7,9 @@ This is an ESP hot reload system that allows loading and reloading ELF libraries
 **Supported targets:** See `idf_component.yml` (this is the single source of truth).
 
 **Key Documents:**
-- `DESIGN.md` - Overall system architecture
-- `ELF_LOADER_DESIGN.md` - Detailed design for ELF loading and relocations
 - `README.md` - User-facing documentation and quick start guide
+- `HOW_IT_WORKS.md` - Architecture, constraints, and implementation details
+- `API.md` - Complete API reference
 
 ## Project Structure
 
