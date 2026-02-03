@@ -11,6 +11,7 @@ maintainers:
 license: "MIT"
 
 targets:
+  - esp32
   - esp32c3
   - esp32c6
   - esp32p4

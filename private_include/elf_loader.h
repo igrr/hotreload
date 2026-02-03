@@ -20,16 +20,38 @@ extern "C" {
  * @brief ELF loader context structure
  *
  * Holds the state for loading and managing a reloadable ELF file.
+ *
+ * On chips requiring split allocation (e.g., ESP32 where IRAM is word-aligned
+ * only), text and data sections are loaded to separate memory regions.
+ * On other chips, a single contiguous allocation is used.
  */
 typedef struct {
+    /* Text region (executable code: .text, .plt, .literal) */
+    void *text_base;          /**< Base address of text allocation (NULL if unified) */
+    size_t text_size;         /**< Size of text region */
+    uintptr_t text_vma_lo;    /**< Lowest VMA of text sections */
+    uintptr_t text_vma_hi;    /**< Highest VMA + size of text sections */
+
+    /* Data region (byte-accessible: .data, .bss, .rodata, .got) */
+    void *data_base;          /**< Base address of data allocation (NULL if unified) */
+    size_t data_size;         /**< Size of data region */
+    uintptr_t data_vma_lo;    /**< Lowest VMA of data sections */
+    uintptr_t data_vma_hi;    /**< Highest VMA + size of data sections */
+
+    /* Unified allocation fields (used when split_alloc is false) */
     void *ram_base;           /**< Base address where ELF is loaded in RAM */
     size_t ram_size;          /**< Total RAM allocated for the ELF */
     uintptr_t vma_base;       /**< Base VMA (virtual memory address) from ELF */
+
+    /* Common fields */
     void *parser;             /**< Internal: elf_parser handle */
     const void *elf_data;     /**< Pointer to ELF data in flash */
     size_t elf_size;          /**< Size of ELF data */
     uint32_t heap_caps;       /**< Memory capabilities for allocation (0 = default) */
-    elf_port_mem_ctx_t mem_ctx; /**< Port layer memory context for address translation */
+    elf_port_mem_ctx_t mem_ctx;      /**< Port layer memory context (data region) */
+    elf_port_mem_ctx_t text_mem_ctx; /**< Port layer memory context (text region) */
+
+    bool split_alloc;         /**< True when using separate text/data allocations */
 } elf_loader_ctx_t;
 
 /**

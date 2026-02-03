@@ -19,6 +19,29 @@
 /* This port is for RISC-V chips with separate I/D address spaces */
 #if CONFIG_IDF_TARGET_ARCH_RISCV && defined(SOC_I_D_OFFSET)
 
+bool elf_mem_port_requires_split_alloc(void)
+{
+    /* RISC-V with I/D offset uses unified allocation with address translation */
+    return false;
+}
+
+esp_err_t elf_mem_port_alloc_split(size_t text_size, size_t data_size,
+                                    uint32_t heap_caps,
+                                    void **text_base, void **data_base,
+                                    elf_port_mem_ctx_t *text_ctx,
+                                    elf_port_mem_ctx_t *data_ctx)
+{
+    /* This port uses unified allocation with I/D offset translation */
+    (void)text_size;
+    (void)data_size;
+    (void)heap_caps;
+    (void)text_base;
+    (void)data_base;
+    (void)text_ctx;
+    (void)data_ctx;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 bool elf_mem_port_prefer_spiram(void)
 {
     /* RISC-V chips with I/D offset don't typically have SPIRAM for code */
