@@ -165,46 +165,11 @@ esp_err_t hotreload_update_partition(const char *partition_label,
                                      const void *elf_data, size_t elf_size);
 
 /**
- * @brief Callback type for reload hooks
- *
- * @param user_ctx User-provided context pointer
- */
-typedef void (*hotreload_hook_fn_t)(void *user_ctx);
-
-/**
- * @brief Register a pre-reload hook
- *
- * The hook is called just before unloading the current ELF.
- * Use this to save state or release resources held by reloadable code.
- *
- * @param hook Callback function (NULL to unregister)
- * @param user_ctx Context passed to callback
- * @return
- *      - ESP_OK: Success
- */
-esp_err_t hotreload_register_pre_hook(hotreload_hook_fn_t hook, void *user_ctx);
-
-/**
- * @brief Register a post-reload hook
- *
- * The hook is called after successfully loading new ELF.
- * Use this to restore state or reinitialize reloadable code.
- *
- * @param hook Callback function (NULL to unregister)
- * @param user_ctx Context passed to callback
- * @return
- *      - ESP_OK: Success
- */
-esp_err_t hotreload_register_post_hook(hotreload_hook_fn_t hook, void *user_ctx);
-
-/**
- * @brief Reload from partition with hooks
+ * @brief Reload from partition
  *
  * Convenience function that:
- * 1. Calls pre-reload hook (if registered)
- * 2. Unloads current ELF
- * 3. Loads new ELF from partition
- * 4. Calls post-reload hook (if registered)
+ * 1. Unloads current ELF
+ * 2. Loads new ELF from partition
  *
  * @param config Configuration for loading
  * @return

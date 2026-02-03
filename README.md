@@ -7,7 +7,6 @@ Runtime hot reload for ESP chips - load and reload ELF modules without reflashin
 - **Runtime ELF Loading**: Load position-independent code from flash or RAM at runtime
 - **HTTP Server**: Upload and reload code over the network
 - **CMake Integration**: Simple `RELOADABLE` keyword in `idf_component_register()` handles all build complexity
-- **Pre/Post Hooks**: Save and restore application state during reloads
 - **PSRAM Support**: On chips with PSRAM, load reloadable code into external memory
 - **Multi-Architecture**: Supports both Xtensa and RISC-V instruction sets
 

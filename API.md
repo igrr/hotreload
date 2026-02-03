@@ -11,7 +11,6 @@
 | Type | Name |
 | ---: | :--- |
 | struct | [**hotreload\_config\_t**](#struct-hotreload_config_t) <br>_Configuration for hotreload\_load()_ |
-| typedef void(\* | [**hotreload\_hook\_fn\_t**](#typedef-hotreload_hook_fn_t)  <br>_Callback type for reload hooks._ |
 | struct | [**hotreload\_server\_config\_t**](#struct-hotreload_server_config_t) <br>_Configuration for the hotreload HTTP server._ |
 
 ## Functions
@@ -20,9 +19,7 @@
 | ---: | :--- |
 |  esp\_err\_t | [**hotreload\_load**](#function-hotreload_load) (const [**hotreload\_config\_t**](#struct-hotreload_config_t)\* config) <br>_Load a reloadable ELF from flash partition._ |
 |  esp\_err\_t | [**hotreload\_load\_from\_buffer**](#function-hotreload_load_from_buffer) (const void \* elf\_data, size\_t elf\_size) <br>_Load a reloadable ELF from a RAM buffer._ |
-|  esp\_err\_t | [**hotreload\_register\_post\_hook**](#function-hotreload_register_post_hook) (hotreload\_hook\_fn\_t hook, void \* user\_ctx) <br>_Register a post-reload hook._ |
-|  esp\_err\_t | [**hotreload\_register\_pre\_hook**](#function-hotreload_register_pre_hook) (hotreload\_hook\_fn\_t hook, void \* user\_ctx) <br>_Register a pre-reload hook._ |
-|  esp\_err\_t | [**hotreload\_reload**](#function-hotreload_reload) (const [**hotreload\_config\_t**](#struct-hotreload_config_t)\* config) <br>_Reload from partition with hooks._ |
+|  esp\_err\_t | [**hotreload\_reload**](#function-hotreload_reload) (const [**hotreload\_config\_t**](#struct-hotreload_config_t)\* config) <br>_Reload from partition._ |
 |  esp\_err\_t | [**hotreload\_server\_start**](#function-hotreload_server_start) (const [**hotreload\_server\_config\_t**](#struct-hotreload_server_config_t)\* config) <br>_Start the hotreload HTTP server._ |
 |  esp\_err\_t | [**hotreload\_server\_stop**](#function-hotreload_server_stop) (void) <br>_Stop the hotreload HTTP server._ |
 |  esp\_err\_t | [**hotreload\_unload**](#function-hotreload_unload) (void) <br>_Unload the currently loaded reloadable ELF._ |
@@ -47,17 +44,6 @@ Variables:
 
 -  const char \* partition_label  <br>Name of partition containing the reloadable ELF
 
-### typedef `hotreload_hook_fn_t`
-
-_Callback type for reload hooks._
-```c
-typedef void(* hotreload_hook_fn_t) (void *user_ctx);
-```
-
-**Parameters:**
-
-
-* `user_ctx` User-provided context pointer
 ### struct `hotreload_server_config_t`
 
 _Configuration for the hotreload HTTP server._
@@ -136,70 +122,18 @@ Similar to hotreload\_load(), but loads from a RAM buffer instead of a flash par
 * ESP\_OK: Success
 * ESP\_ERR\_INVALID\_ARG: Invalid arguments
 * Other errors from ELF loader
-### function `hotreload_register_post_hook`
-
-_Register a post-reload hook._
-```c
-esp_err_t hotreload_register_post_hook (
-    hotreload_hook_fn_t hook,
-    void * user_ctx
-) 
-```
-
-The hook is called after successfully loading new ELF. Use this to restore state or reinitialize reloadable code.
-
-
-
-**Parameters:**
-
-
-* `hook` Callback function (NULL to unregister) 
-* `user_ctx` Context passed to callback 
-
-
-**Returns:**
-
-
-* ESP\_OK: Success
-### function `hotreload_register_pre_hook`
-
-_Register a pre-reload hook._
-```c
-esp_err_t hotreload_register_pre_hook (
-    hotreload_hook_fn_t hook,
-    void * user_ctx
-) 
-```
-
-The hook is called just before unloading the current ELF. Use this to save state or release resources held by reloadable code.
-
-
-
-**Parameters:**
-
-
-* `hook` Callback function (NULL to unregister) 
-* `user_ctx` Context passed to callback 
-
-
-**Returns:**
-
-
-* ESP\_OK: Success
 ### function `hotreload_reload`
 
-_Reload from partition with hooks._
+_Reload from partition._
 ```c
 esp_err_t hotreload_reload (
     const hotreload_config_t * config
-) 
+)
 ```
 
 Convenience function that:
-* Calls pre-reload hook (if registered)
 * Unloads current ELF
 * Loads new ELF from partition
-* Calls post-reload hook (if registered)
 
 
 

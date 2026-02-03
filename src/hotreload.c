@@ -24,12 +24,6 @@ static bool s_is_loaded = false;
 static bool s_loaded_from_buffer = false;  // True if loaded from RAM buffer (no mmap)
 static bool s_update_pending = false;      // Set when partition is updated, cleared on load
 
-// Hook state
-static hotreload_hook_fn_t s_pre_hook = NULL;
-static void *s_pre_hook_ctx = NULL;
-static hotreload_hook_fn_t s_post_hook = NULL;
-static void *s_post_hook_ctx = NULL;
-
 // Forward declarations
 esp_err_t hotreload_unload(void);
 
@@ -250,30 +244,10 @@ esp_err_t hotreload_update_partition(const char *partition_label,
     return ESP_OK;
 }
 
-esp_err_t hotreload_register_pre_hook(hotreload_hook_fn_t hook, void *user_ctx)
-{
-    s_pre_hook = hook;
-    s_pre_hook_ctx = user_ctx;
-    return ESP_OK;
-}
-
-esp_err_t hotreload_register_post_hook(hotreload_hook_fn_t hook, void *user_ctx)
-{
-    s_post_hook = hook;
-    s_post_hook_ctx = user_ctx;
-    return ESP_OK;
-}
-
 esp_err_t hotreload_reload(const hotreload_config_t *config)
 {
     if (config == NULL) {
         return ESP_ERR_INVALID_ARG;
-    }
-
-    // Call pre-reload hook
-    if (s_pre_hook != NULL) {
-        ESP_LOGD(TAG, "Calling pre-reload hook");
-        s_pre_hook(s_pre_hook_ctx);
     }
 
     // Unload current ELF (if any)
@@ -286,12 +260,6 @@ esp_err_t hotreload_reload(const hotreload_config_t *config)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Reload failed: %d", err);
         return err;
-    }
-
-    // Call post-reload hook
-    if (s_post_hook != NULL) {
-        ESP_LOGD(TAG, "Calling post-reload hook");
-        s_post_hook(s_post_hook_ctx);
     }
 
     ESP_LOGI(TAG, "Reload complete");
