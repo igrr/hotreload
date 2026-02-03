@@ -56,8 +56,29 @@ QEMU_TARGETS = ["esp32", "esp32c3", "esp32s3"]
 # Hardware targets - read from component manifest
 SUPPORTED_TARGETS = get_supported_targets()
 RELOADABLE_SRC = PROJECT_DIR / "components" / "reloadable" / "reloadable.c"
-RELOADABLE_ELF = PROJECT_DIR / "build" / "esp-idf" / "reloadable" / "reloadable_stripped.so"
 SERVER_PORT = 8080
+
+
+def get_reloadable_elf_path(build_dir: Path | str | None = None) -> Path:
+    """Get the path to the reloadable ELF based on build directory.
+
+    Args:
+        build_dir: Build directory path. If None, uses default 'build'.
+
+    Returns:
+        Path to the reloadable_stripped.so file.
+    """
+    if build_dir is None:
+        build_dir = PROJECT_DIR / "build"
+    else:
+        build_dir = Path(build_dir)
+        if not build_dir.is_absolute():
+            build_dir = PROJECT_DIR / build_dir
+    return build_dir / "esp-idf" / "reloadable" / "reloadable_stripped.so"
+
+
+# Default path for QEMU tests (uses standard build directory)
+RELOADABLE_ELF = get_reloadable_elf_path()
 
 
 def modify_reloadable_code(greeting: str):
@@ -73,10 +94,24 @@ def modify_reloadable_code(greeting: str):
     return content  # Return original for restoration
 
 
-def rebuild_reloadable():
-    """Rebuild just the reloadable component."""
+def rebuild_reloadable(build_dir: Path | str | None = None):
+    """Rebuild just the reloadable component.
+
+    Args:
+        build_dir: Build directory path. If None, uses default 'build'.
+                   When using CMake presets, this should be the preset build dir
+                   (e.g., 'build/esp32p4-hardware').
+    """
+    cmd = ["idf.py"]
+    if build_dir is not None:
+        build_dir = Path(build_dir)
+        if not build_dir.is_absolute():
+            build_dir = PROJECT_DIR / build_dir
+        cmd.extend(["-B", str(build_dir)])
+    cmd.append("build")
+
     result = subprocess.run(
-        ["idf.py", "build"],
+        cmd,
         cwd=PROJECT_DIR,
         capture_output=True,
         text=True,
@@ -89,10 +124,23 @@ def rebuild_reloadable():
     return True
 
 
-def run_idf_reload(url: str) -> subprocess.CompletedProcess:
-    """Run idf.py reload command."""
+def run_idf_reload(url: str, build_dir: Path | str | None = None) -> subprocess.CompletedProcess:
+    """Run idf.py reload command.
+
+    Args:
+        url: URL of the hotreload server.
+        build_dir: Build directory path. If None, uses default 'build'.
+    """
+    cmd = ["idf.py"]
+    if build_dir is not None:
+        build_dir = Path(build_dir)
+        if not build_dir.is_absolute():
+            build_dir = PROJECT_DIR / build_dir
+        cmd.extend(["-B", str(build_dir)])
+    cmd.extend(["reload", "--url", url, "--verbose"])
+
     result = subprocess.run(
-        ["idf.py", "reload", "--url", url, "--verbose"],
+        cmd,
         cwd=PROJECT_DIR,
         capture_output=True,
         text=True,
@@ -101,11 +149,17 @@ def run_idf_reload(url: str) -> subprocess.CompletedProcess:
     return result
 
 
-def upload_elf(port: int) -> requests.Response:
-    """Upload the new ELF (reload happens via cooperative polling in app)."""
-    url = f"http://127.0.0.1:{port}/upload"
+def upload_elf(port: int, build_dir: Path | str | None = None) -> requests.Response:
+    """Upload the new ELF (reload happens via cooperative polling in app).
 
-    with open(RELOADABLE_ELF, "rb") as f:
+    Args:
+        port: Port number of the hotreload server.
+        build_dir: Build directory path. If None, uses default 'build'.
+    """
+    url = f"http://127.0.0.1:{port}/upload"
+    elf_path = get_reloadable_elf_path(build_dir)
+
+    with open(elf_path, "rb") as f:
         elf_data = f.read()
 
     print(f"  Uploading {len(elf_data)} bytes to {url}")
@@ -228,13 +282,12 @@ def test_hot_reload_e2e(dut, original_code):
     print("Step 7: Waiting for app to detect update and reload...")
 
     # Wait for reload complete message
-    dut.expect("Reload complete", timeout=30)
+    dut.expect("Reload successful", timeout=30)
     print("  Reload complete message received!")
 
-    # Verify no crash occurred by checking we can still communicate
-    # The main loop should still be running
-    dut.expect("Main loop running", timeout=15)
-    print("  Main loop still running - no crash!")
+    # Verify no crash occurred - check for main loop continuing after reload
+    dut.expect(r"Goodbye.*from main loop", timeout=15)
+    print("  Main loop still running with new code - no crash!")
 
     print("\n=== Hot Reload E2E Test PASSED ===\n")
 
@@ -317,12 +370,12 @@ def test_idf_reload_command(dut, original_code):
 
     # Step 6: Verify reload on device (app polls and reloads at safe point)
     print("Step 6: Waiting for app to detect update and reload...")
-    dut.expect("Reload complete", timeout=30)
+    dut.expect("Reload successful", timeout=30)
     print("  Reload complete message received!")
 
-    # Verify no crash
-    dut.expect("Main loop running", timeout=15)
-    print("  Main loop still running - no crash!")
+    # Verify no crash - check for main loop continuing after reload
+    dut.expect(r"Howdy.*from main loop", timeout=15)
+    print("  Main loop still running with new code - no crash!")
 
     print("\n=== idf.py reload Command Test PASSED ===\n")
 
@@ -500,14 +553,14 @@ def test_idf_watch_with_qemu(target, original_code):
 
         # Step 10: Verify device received reload
         print("Step 10: Verifying device received reload...")
-        assert capture.wait_for_stdout(r"Reload complete", timeout=30), \
+        assert capture.wait_for_stdout(r"Reload successful", timeout=30), \
             "Device should report reload complete"
         print("  Device reload confirmed!")
 
-        # Verify no crash
-        assert capture.wait_for_stdout(r"Main loop running", timeout=15), \
-            "Main loop should still be running"
-        print("  Main loop still running - no crash!")
+        # Verify no crash - check for main loop continuing after reload
+        assert capture.wait_for_stdout(r"Greetings.*from main loop", timeout=15), \
+            "Main loop should still be running with new code"
+        print("  Main loop still running with new code - no crash!")
 
         print("\n=== idf.py watch + qemu Test PASSED ===\n")
 
@@ -565,7 +618,7 @@ def test_hotreload_unit_tests_hardware(dut):
 @pytest.mark.host_test
 @pytest.mark.parametrize("target", SUPPORTED_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
-def test_hot_reload_e2e_hardware(dut, original_code):
+def test_hot_reload_e2e_hardware(dut, app, original_code):
     """
     End-to-end test for hot reload functionality on real hardware.
 
@@ -583,6 +636,10 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     - Build with correct preset: idf.py --preset <target>-hardware build flash
     """
     print("\n=== Starting Hot Reload E2E Test on Hardware ===\n")
+
+    # Get build directory from app fixture (supports CMake presets)
+    build_dir = Path(app.binary_path)
+    print(f"  Using build directory: {build_dir}")
 
     # Step 0: Wait for Unity menu and select the integration test
     print("Step 0: Selecting integration test from Unity menu...")
@@ -630,15 +687,16 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     modify_reloadable_code("Goodbye")
     print("  Code modified!")
 
-    # Step 6: Rebuild
+    # Step 6: Rebuild (use build directory from app fixture)
     print("Step 6: Rebuilding reloadable component...")
-    rebuild_reloadable()
+    rebuild_reloadable(build_dir)
     print("  Build successful!")
 
     # Step 7: Upload ELF (app will reload via cooperative polling)
     print("Step 7: Uploading new ELF...")
     url = f"{device_url}/upload"
-    with open(RELOADABLE_ELF, "rb") as f:
+    elf_path = get_reloadable_elf_path(build_dir)
+    with open(elf_path, "rb") as f:
         elf_data = f.read()
     print(f"  Uploading {len(elf_data)} bytes to {url}")
     response = requests.post(
@@ -652,12 +710,12 @@ def test_hot_reload_e2e_hardware(dut, original_code):
 
     # Step 8: Verify reload (app polls and reloads at safe point)
     print("Step 8: Waiting for app to detect update and reload...")
-    dut.expect("Reload complete", timeout=30)
+    dut.expect("Reload successful", timeout=30)
     print("  Reload complete message received!")
 
-    # Verify no crash occurred
-    dut.expect("Main loop running", timeout=15)
-    print("  Main loop still running - no crash!")
+    # Verify no crash occurred - check for main loop continuing after reload
+    dut.expect(r"Goodbye.*from main loop", timeout=15)
+    print("  Main loop still running with new code - no crash!")
 
     print("\n=== Hot Reload E2E Test on Hardware PASSED ===\n")
 
@@ -665,13 +723,17 @@ def test_hot_reload_e2e_hardware(dut, original_code):
 @pytest.mark.host_test
 @pytest.mark.parametrize("target", SUPPORTED_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["esp,idf"], indirect=True)
-def test_idf_reload_command_hardware(dut, original_code):
+def test_idf_reload_command_hardware(dut, app, original_code):
     """
     Test the idf.py reload command on real hardware.
 
     Discovers the device IP from serial output and runs reload.
     """
     print("\n=== Testing idf.py reload Command on Hardware ===\n")
+
+    # Get build directory from app fixture (supports CMake presets)
+    build_dir = Path(app.binary_path)
+    print(f"  Using build directory: {build_dir}")
 
     # Step 0: Wait for Unity menu and select the integration test
     print("Step 0: Selecting integration test from Unity menu...")
@@ -718,9 +780,9 @@ def test_idf_reload_command_hardware(dut, original_code):
     modify_reloadable_code("Howdy")
     print("  Code modified!")
 
-    # Step 6: Run idf.py reload command
-    print(f"Step 6: Running 'idf.py reload --url {device_url}'...")
-    result = run_idf_reload(device_url)
+    # Step 6: Run idf.py reload command (use build directory from app fixture)
+    print(f"Step 6: Running 'idf.py -B {build_dir} reload --url {device_url}'...")
+    result = run_idf_reload(device_url, build_dir)
 
     print(f"  Return code: {result.returncode}")
     if result.stdout:
@@ -734,12 +796,12 @@ def test_idf_reload_command_hardware(dut, original_code):
 
     # Step 7: Verify reload on device (app polls and reloads at safe point)
     print("Step 7: Waiting for app to detect update and reload...")
-    dut.expect("Reload complete", timeout=30)
+    dut.expect("Reload successful", timeout=30)
     print("  Reload complete message received!")
 
-    # Verify no crash
-    dut.expect("Main loop running", timeout=15)
-    print("  Main loop still running - no crash!")
+    # Verify no crash - check for main loop continuing after reload
+    dut.expect(r"Howdy.*from main loop", timeout=15)
+    print("  Main loop still running with new code - no crash!")
 
     print("\n=== idf.py reload Command Test on Hardware PASSED ===\n")
 

@@ -1,12 +1,8 @@
 # ESP32-P4 specific configuration
 # This file is applied when building for ESP32-P4 target
 
-# Use UART console (default, not USB-Serial/JTAG)
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
-
-# Support chip revision v1.0 (requires enabling revisions <3.0)
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-CONFIG_ESP32P4_REV_MIN_100=y
+# Use USB-Serial/JTAG console (chip revision 3.x)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # Disable memory protection to allow loading executable code at runtime
 # Hot reload requires executing code from dynamically allocated memory,
