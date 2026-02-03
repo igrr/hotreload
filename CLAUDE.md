@@ -16,27 +16,39 @@ This is an ESP hot reload system that allows loading and reloading ELF libraries
 ```
 hotreload/
 ├── src/
-│   ├── elf_loader.c          # ELF loader (Xtensa + RISC-V relocations)
-│   ├── elf_parser.c          # ELF file parsing
-│   ├── hotreload.c           # Public API implementation
-│   └── hotreload_server.c    # HTTP server for remote reload
+│   ├── elf_loader.c  # Core ELF loader implementation (chip-agnostic)
+│   ├── elf_parser.c  # ELF file parsing and section/symbol iteration
+│   ├── hotreload.c  # Public API for loading and reloading ELF modules
+│   └── hotreload_server.c  # HTTP server for receiving ELF updates over the network
 ├── port/
-│   └── elf_loader_mem.c      # Platform-specific memory operations (PSRAM)
+│   ├── elf_loader_mem.c  # Memory allocation and address translation for ELF loader
+│   ├── elf_loader_mem_port_default.c  # Default memory port for chips with unified address space
+│   ├── elf_loader_mem_port_esp32s2.c  # ESP32-S2 memory port with MMU management for PSRAM code execution
+│   ├── elf_loader_mem_port_esp32s3.c  # ESP32-S3 memory port with fixed PSRAM offset for code execution
+│   ├── elf_loader_mem_port_riscv_id.c  # RISC-V memory port for chips with separate I/D address spaces
+│   ├── elf_loader_reloc_riscv.c  # RISC-V relocation handling for ELF loader
+│   └── elf_loader_reloc_xtensa.c  # Xtensa relocation handling for ELF loader
 ├── include/
-│   ├── hotreload.h           # Public API
-│   └── elf_loader.h          # ELF loader API
+│   └── hotreload.h  # Configuration for hotreload_load()
 ├── private_include/
-│   ├── elf_parser.h          # Internal ELF parser API
-│   └── elf_loader_port.h     # Port layer API
+│   ├── elf_loader.h  # ELF loader context structure
+│   ├── elf_loader_mem_port.h  # Internal port layer for chip-specific memory operations
+│   ├── elf_loader_port.h  # Port layer API for ELF loader chip-specific functionality
+│   └── elf_parser.h  # Prototype of a user-supplied read callback.
 ├── scripts/
-│   ├── gen_ld_script.py      # Linker script generator
-│   └── gen_reloadable.py     # Stub/symbol table generator
+│   ├── gen_ld_script.py  # Linker script generator for reloadable ELF modules.
+│   ├── gen_reloadable.py  # Stub generator and symbol table creator for reloadable modules.
+│   └── update_claude_md_structure.py
 ├── test_apps/hotreload_test/
-│   ├── test_host/hotreload_tests/
-│   │   └── test_elf_loader.c # Unity unit tests (48-51 test cases depending on target)
-│   ├── test_hotreload.py     # Pytest integration tests
-│   └── components/reloadable/ # Test reloadable component
-└── project_include.cmake     # Build system integration
+│   ├── components/
+│   │   ├── reloadable/
+│   │   └── test_defs/
+│   ├── main/
+│   │   └── hotreload.c
+│   ├── test_host/
+│   │   └── hotreload_tests/
+│   └── test_hotreload.py
+└── project_include.cmake
 ```
 
 ## Development Workflow

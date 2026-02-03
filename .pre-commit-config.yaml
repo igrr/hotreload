@@ -1,4 +1,13 @@
 repos:
+-   repo: local
+    hooks:
+    -   id: update-claude-md-structure
+        name: Update CLAUDE.md project structure
+        entry: python3 scripts/update_claude_md_structure.py
+        language: system
+        files: ^(src|port|include|private_include|scripts|test_apps)/.*$
+        pass_filenames: false
+
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

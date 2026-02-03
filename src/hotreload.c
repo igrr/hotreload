@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @file hotreload.c
+ * @brief Public API for loading and reloading ELF modules
+ */
+
 #include <string.h>
 #include "hotreload.h"
 #include "elf_loader.h"

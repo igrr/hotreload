@@ -1,4 +1,5 @@
 #! /usr/bin/env python3
+"""Stub generator and symbol table creator for reloadable modules."""
 
 import argparse
 import os
