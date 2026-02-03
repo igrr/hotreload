@@ -533,13 +533,17 @@ def get_device_ip_from_serial(dut, timeout: int = 60) -> str:
     """
     Wait for the device to print its IP address and extract it.
 
-    The device typically prints something like:
-    - "Got IP Address: 192.168.1.100" (DHCP)
+    The device typically prints something like (protocol_examples_common):
+    - "Got IPv4 event: Interface ... address: 192.168.1.100"
+    - "- IPv4 address: 192.168.1.100,"
+    - "example_netif_eth ip: 192.168.1.100"
+    Or legacy formats:
+    - "Got IP Address: 192.168.1.100"
     - "Static IP: 192.168.1.100"
     """
-    # Wait for IP address to be printed
+    # Wait for IP address to be printed - match multiple possible formats
     match = dut.expect(
-        r"(?:Got IP Address|Static IP|IPv4 address):\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
+        r"(?:Got IP(?:v4)?(?: event:.*)?[Aa]ddress|Static IP|IPv4 address|ip)[:\s]+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
         timeout=timeout
     )
     ip_address = match.group(1).decode() if isinstance(match.group(1), bytes) else match.group(1)
@@ -592,28 +596,28 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     dut.write('"hotreload_integration"')
     print("  Integration test selected!")
 
-    # Step 1: Wait for initial load message
-    print("Step 1: Waiting for initial reloadable function call...")
+    # Step 1: Get device IP (printed during network init)
+    print("Step 1: Waiting for network connectivity...")
+    device_ip = get_device_ip_from_serial(dut, timeout=60)
+    print(f"  Device IP: {device_ip}")
+
+    # Step 2: Wait for initial load message (happens during ELF load, before server starts)
+    print("Step 2: Waiting for initial reloadable function call...")
     dut.expect(r"Hello.*from initial load", timeout=120)
     print("  Initial load confirmed!")
 
-    # Step 2: Wait for network and get device IP
-    print("Step 2: Waiting for network connectivity and server...")
+    # Step 3: Wait for server to start (starts after initial load)
+    print("Step 3: Waiting for HTTP server to start...")
     dut.expect("Hotreload server started on port 8080", timeout=60)
     print("  Server started!")
-
-    # Get the device's IP address from earlier output
-    # For hardware tests, we need to discover the device IP
-    device_ip = get_device_ip_from_serial(dut, timeout=5)
-    print(f"  Device IP: {device_ip}")
 
     device_url = f"http://{device_ip}:8080"
 
     # Give the network stack a moment to be fully ready
     time.sleep(3)
 
-    # Step 3: Verify server is accessible
-    print(f"Step 3: Verifying server is accessible at {device_url}...")
+    # Step 4: Verify server is accessible
+    print(f"Step 4: Verifying server is accessible at {device_url}...")
     for i in range(15):
         try:
             response = requests.get(f"{device_url}/status", timeout=5)
@@ -627,18 +631,18 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     else:
         pytest.fail(f"Server not accessible at {device_url} after 15 attempts")
 
-    # Step 4: Modify reloadable code
-    print("Step 4: Modifying reloadable code (Hello -> Goodbye)...")
+    # Step 5: Modify reloadable code
+    print("Step 5: Modifying reloadable code (Hello -> Goodbye)...")
     modify_reloadable_code("Goodbye")
     print("  Code modified!")
 
-    # Step 5: Rebuild
-    print("Step 5: Rebuilding reloadable component...")
+    # Step 6: Rebuild
+    print("Step 6: Rebuilding reloadable component...")
     rebuild_reloadable()
     print("  Build successful!")
 
-    # Step 6: Upload ELF (app will reload via cooperative polling)
-    print("Step 6: Uploading new ELF...")
+    # Step 7: Upload ELF (app will reload via cooperative polling)
+    print("Step 7: Uploading new ELF...")
     url = f"{device_url}/upload"
     with open(RELOADABLE_ELF, "rb") as f:
         elf_data = f.read()
@@ -652,8 +656,8 @@ def test_hot_reload_e2e_hardware(dut, original_code):
     print(f"  Server response: {response.status_code} - {response.text.strip()}")
     assert response.status_code == 200, f"Upload failed: {response.text}"
 
-    # Step 7: Verify reload (app polls and reloads at safe point)
-    print("Step 7: Waiting for app to detect update and reload...")
+    # Step 8: Verify reload (app polls and reloads at safe point)
+    print("Step 8: Waiting for app to detect update and reload...")
     dut.expect("Reload complete", timeout=30)
     print("  Reload complete message received!")
 
@@ -681,25 +685,27 @@ def test_idf_reload_command_hardware(dut, original_code):
     dut.write('"hotreload_integration"')
     print("  Integration test selected!")
 
-    # Step 1: Wait for initial load
-    print("Step 1: Waiting for initial reloadable function call...")
+    # Step 1: Get device IP (printed during network init)
+    print("Step 1: Waiting for network connectivity...")
+    device_ip = get_device_ip_from_serial(dut, timeout=60)
+    print(f"  Device IP: {device_ip}")
+    device_url = f"http://{device_ip}:8080"
+
+    # Step 2: Wait for initial load (happens during ELF load, before server starts)
+    print("Step 2: Waiting for initial reloadable function call...")
     dut.expect(r"Hello.*from initial load", timeout=120)
     print("  Initial load confirmed!")
 
-    # Step 2: Wait for server to start and get device IP
-    print("Step 2: Waiting for HTTP server to start...")
+    # Step 3: Wait for server to start (starts after initial load)
+    print("Step 3: Waiting for HTTP server to start...")
     dut.expect("Hotreload server started on port 8080", timeout=60)
     print("  Server started!")
-
-    device_ip = get_device_ip_from_serial(dut, timeout=5)
-    print(f"  Device IP: {device_ip}")
-    device_url = f"http://{device_ip}:8080"
 
     # Give the network stack a moment
     time.sleep(3)
 
-    # Step 3: Verify server is accessible
-    print(f"Step 3: Verifying server is accessible at {device_url}...")
+    # Step 4: Verify server is accessible
+    print(f"Step 4: Verifying server is accessible at {device_url}...")
     for i in range(15):
         try:
             response = requests.get(f"{device_url}/status", timeout=5)
@@ -713,13 +719,13 @@ def test_idf_reload_command_hardware(dut, original_code):
     else:
         pytest.fail(f"Server not accessible at {device_url}")
 
-    # Step 4: Modify reloadable code
-    print("Step 4: Modifying reloadable code (Hello -> Howdy)...")
+    # Step 5: Modify reloadable code
+    print("Step 5: Modifying reloadable code (Hello -> Howdy)...")
     modify_reloadable_code("Howdy")
     print("  Code modified!")
 
-    # Step 5: Run idf.py reload command
-    print(f"Step 5: Running 'idf.py reload --url {device_url}'...")
+    # Step 6: Run idf.py reload command
+    print(f"Step 6: Running 'idf.py reload --url {device_url}'...")
     result = run_idf_reload(device_url)
 
     print(f"  Return code: {result.returncode}")
@@ -732,8 +738,8 @@ def test_idf_reload_command_hardware(dut, original_code):
     assert "Upload complete!" in result.stdout, "Expected success message not found"
     print("  idf.py reload (upload) completed successfully!")
 
-    # Step 6: Verify reload on device (app polls and reloads at safe point)
-    print("Step 6: Waiting for app to detect update and reload...")
+    # Step 7: Verify reload on device (app polls and reloads at safe point)
+    print("Step 7: Waiting for app to detect update and reload...")
     dut.expect("Reload complete", timeout=30)
     print("  Reload complete message received!")
 

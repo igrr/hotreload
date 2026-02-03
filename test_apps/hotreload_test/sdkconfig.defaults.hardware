@@ -1,11 +1,11 @@
 # Hardware-specific configuration
 # This file is applied when building for real ESP32 hardware
 
-# Disable networking for basic unit tests
-# For E2E tests that need networking, configure WiFi via menuconfig
+# Disable WiFi by default for basic unit tests
+# For E2E tests that need networking, enable in chip-specific sdkconfig.defaults.<chip>
 # or create a sdkconfig.local with your WiFi credentials
 CONFIG_EXAMPLE_CONNECT_WIFI=n
-CONFIG_EXAMPLE_CONNECT_ETHERNET=n
+# Note: CONFIG_EXAMPLE_CONNECT_ETHERNET is set per-chip in sdkconfig.defaults.<chip>
 
 # Disable OpenETH (QEMU-only)
 CONFIG_ETH_USE_OPENETH=n
