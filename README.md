@@ -234,36 +234,12 @@ See [API.md](API.md) for the complete API documentation.
 
 ## How It Works
 
-### Symbol Table Indirection
+See [HOW_IT_WORKS.md](HOW_IT_WORKS.md) for a detailed explanation of the architecture, constraints, and implementation.
 
-Calls to reloadable functions go through stub functions that perform indirect jumps via a symbol table:
-
-```
-Application -> Stub Function -> Symbol Table -> Reloadable Code
-```
-
-When code is reloaded, only the symbol table is updated. The stubs remain unchanged.
-
-### Build Process
-
-When a component uses the `RELOADABLE` keyword (or is listed in `CONFIG_HOTRELOAD_COMPONENTS`), the build system:
-
-1. Compiles reloadable sources as a shared library (separate from main app)
-2. Extracts exported symbols using `nm`
-3. Generates assembly stubs for each function
-4. Generates a C file with the symbol table
-5. Creates a linker script with main app symbol addresses
-6. Rebuilds with relocations preserved
-7. Strips unnecessary sections
-8. Sets up flash targets
-
-### Key Constraints
-
-- When the main firmware is updated, the reloadable library must be rebuilt
-- Main firmware can only call **functions** in reloadable code (not access global variables)
-- Changes to function signatures or data structures require main firmware rebuild
-- Reloadable code can call main firmware functions at fixed addresses
-- Reload must only be triggered when no reloadable functions are on any task's call stack (see [HTTP Server](#http-server-for-ota-reload) for the safe reload pattern)
+**Key points:**
+- Calls to reloadable functions go through stub functions and a symbol table
+- When code is reloaded, only the symbol table pointers are updated
+- Reload must only be triggered when no reloadable functions are on any task's call stack
 
 ## Example Project
 
