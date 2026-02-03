@@ -49,10 +49,10 @@ esp_err_t elf_mem_port_alloc_split(size_t text_size, size_t data_size,
         *text_base = heap_caps_aligned_alloc(4, text_size,
                                               MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
         if (*text_base == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate %zu bytes in IRAM for text", text_size);
+            ESP_LOGE(TAG, "Failed to allocate %u bytes in IRAM for text", (unsigned)text_size);
             return ESP_ERR_NO_MEM;
         }
-        ESP_LOGI(TAG, "Text region: %zu bytes at %p (IRAM)", text_size, *text_base);
+        ESP_LOGD(TAG, "Text region: %u bytes at %p (IRAM)", (unsigned)text_size, *text_base);
     }
 
     /* Allocate data in DRAM (byte-addressable, for .rodata, .data, .bss, .got)
@@ -62,14 +62,14 @@ esp_err_t elf_mem_port_alloc_split(size_t text_size, size_t data_size,
         *data_base = heap_caps_aligned_alloc(4, data_size,
                                               MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
         if (*data_base == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate %zu bytes in DRAM for data", data_size);
+            ESP_LOGE(TAG, "Failed to allocate %u bytes in DRAM for data", (unsigned)data_size);
             if (*text_base != NULL) {
                 heap_caps_free(*text_base);
                 *text_base = NULL;
             }
             return ESP_ERR_NO_MEM;
         }
-        ESP_LOGI(TAG, "Data region: %zu bytes at %p (DRAM)", data_size, *data_base);
+        ESP_LOGD(TAG, "Data region: %u bytes at %p (DRAM)", (unsigned)data_size, *data_base);
     }
 
     /* No address translation needed - IRAM and DRAM are directly usable */

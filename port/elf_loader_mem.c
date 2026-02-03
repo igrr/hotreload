@@ -67,12 +67,12 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
         }
 
         if (ram == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate %zu bytes for ELF", size);
+            ESP_LOGE(TAG, "Failed to allocate %u bytes for ELF", (unsigned)size);
             return ESP_ERR_NO_MEM;
         }
     }
 
-    ESP_LOGI(TAG, "Allocated %zu bytes at %p for ELF loading", size, ram);
+    ESP_LOGD(TAG, "Allocated %u bytes at %p for ELF loading", (unsigned)size, ram);
 
     /* Let port layer set up any execution mapping (MMU, offsets, etc.) */
     esp_err_t err = elf_mem_port_init_exec_mapping(ram, size, ctx);
@@ -132,8 +132,8 @@ esp_err_t elf_port_alloc_split(size_t text_size, size_t data_size,
         return err;
     }
 
-    ESP_LOGI(TAG, "Split allocation: text=%zu bytes at %p, data=%zu bytes at %p",
-             text_size, *text_base, data_size, *data_base);
+    ESP_LOGD(TAG, "Split allocation: text=%u bytes at %p, data=%u bytes at %p",
+             (unsigned)text_size, *text_base, (unsigned)data_size, *data_base);
 
     return ESP_OK;
 }

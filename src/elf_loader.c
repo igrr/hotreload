@@ -89,6 +89,22 @@ static void memset_word_aligned(void *dest, int val, size_t n)
     }
 }
 
+/**
+ * Check if a section should be placed in the text (executable) region
+ *
+ * For ESP32 split allocation, only actual code sections go to IRAM.
+ * All other sections (rodata, data, bss, got, etc.) go to DRAM for byte access.
+ *
+ * @param section_name The section name (e.g., ".text", ".rodata")
+ * @return true if section should go to text region (IRAM), false for data region (DRAM)
+ */
+static bool is_text_section(const char *section_name)
+{
+    /* Only .text and .plt sections contain executable code */
+    return (strcmp(section_name, ".text") == 0 ||
+            strcmp(section_name, ".plt") == 0);
+}
+
 /* Read callback for elf_parser - reads from memory-mapped ELF data */
 static size_t elf_loader_read_cb(void *user_ctx, size_t offset, size_t n_bytes, void *dest)
 {
@@ -201,22 +217,23 @@ esp_err_t elf_loader_calculate_memory_layout(elf_loader_ctx_t *ctx,
     uintptr_t vma_min = UINTPTR_MAX;
     uintptr_t vma_max = 0;
 
-    /* Split allocation: separate text (executable) and data regions */
+    /* Split allocation: separate text (executable code) and data regions
+     * Classification is based on section names, not segment flags, because
+     * on ESP32 we need .rodata in DRAM (byte-addressable) even though it's
+     * in an executable segment. */
     uintptr_t text_vma_lo = UINTPTR_MAX;
     uintptr_t text_vma_hi = 0;
     uintptr_t data_vma_lo = UINTPTR_MAX;
     uintptr_t data_vma_hi = 0;
 
-    bool found_segment = false;
+    bool found_loadable = false;
 
-    /* Use PT_LOAD segments for layout calculation
-     * Segments contain the authoritative information about what gets loaded
-     * and their permissions (PF_X = executable) */
-    elf_iterator_handle_t it;
-    elf_parser_get_segments_it(parser, &it);
+    /* First pass: use PT_LOAD segments for overall VMA range (unified allocation) */
+    elf_iterator_handle_t seg_it;
+    elf_parser_get_segments_it(parser, &seg_it);
 
     elf_segment_handle_t seg;
-    while (elf_segment_next(parser, &it, &seg)) {
+    while (elf_segment_next(parser, &seg_it, &seg)) {
         uint32_t type = elf_segment_get_type(seg);
         if (type != PT_LOAD) {
             continue;
@@ -224,16 +241,12 @@ esp_err_t elf_loader_calculate_memory_layout(elf_loader_ctx_t *ctx,
 
         uintptr_t vaddr = elf_segment_get_vaddr(seg);
         size_t memsz = elf_segment_get_memsz(seg);
-        uint32_t flags = elf_segment_get_flags(seg);
 
         if (memsz == 0) {
             continue;
         }
 
-        found_segment = true;
-
-        ESP_LOGD(TAG, "Segment: vaddr=0x%x memsz=0x%x flags=0x%x%s",
-                 vaddr, memsz, flags, (flags & PF_X) ? " (exec)" : "");
+        found_loadable = true;
 
         /* Update overall range (for unified allocation) */
         if (vaddr < vma_min) {
@@ -242,30 +255,65 @@ esp_err_t elf_loader_calculate_memory_layout(elf_loader_ctx_t *ctx,
         if (vaddr + memsz > vma_max) {
             vma_max = vaddr + memsz;
         }
-
-        /* Update split ranges based on executable flag */
-        if (flags & PF_X) {
-            /* Executable segment -> text region */
-            if (vaddr < text_vma_lo) {
-                text_vma_lo = vaddr;
-            }
-            if (vaddr + memsz > text_vma_hi) {
-                text_vma_hi = vaddr + memsz;
-            }
-        } else {
-            /* Non-executable segment -> data region */
-            if (vaddr < data_vma_lo) {
-                data_vma_lo = vaddr;
-            }
-            if (vaddr + memsz > data_vma_hi) {
-                data_vma_hi = vaddr + memsz;
-            }
-        }
     }
 
-    if (!found_segment) {
+    if (!found_loadable) {
         ESP_LOGE(TAG, "No loadable segments found");
         return ESP_ERR_NOT_FOUND;
+    }
+
+    /* Second pass: iterate sections to classify into text vs data regions
+     * This is needed for split allocation where .rodata must go to DRAM
+     * even though it's in an executable segment */
+    elf_iterator_handle_t sec_it;
+    elf_parser_get_sections_it(parser, &sec_it);
+
+    elf_section_handle_t sec;
+    while (elf_section_next(parser, &sec_it, &sec)) {
+        uint32_t sec_type = elf_section_get_type(sec);
+
+        /* Only consider allocatable sections (SHT_PROGBITS, SHT_NOBITS) */
+        if (sec_type != SHT_PROGBITS && sec_type != SHT_NOBITS &&
+            sec_type != SHT_DYNAMIC && sec_type != SHT_DYNSYM &&
+            sec_type != SHT_HASH && sec_type != SHT_STRTAB &&
+            sec_type != SHT_RELA && sec_type != SHT_REL) {
+            continue;
+        }
+
+        uintptr_t addr = elf_section_get_addr(sec);
+        uint32_t size = elf_section_get_size(sec);
+
+        /* Skip sections not in the loadable range or zero-sized */
+        if (size == 0 || addr < vma_min || addr >= vma_max) {
+            continue;
+        }
+
+        char sec_name[32];
+        if (elf_section_get_name(sec, sec_name, sizeof(sec_name)) != ESP_OK) {
+            continue;
+        }
+
+        /* Classify based on section name */
+        bool is_text = is_text_section(sec_name);
+
+        ESP_LOGD(TAG, "Section %s: addr=0x%x size=0x%x -> %s",
+                 sec_name, addr, size, is_text ? "text" : "data");
+
+        if (is_text) {
+            if (addr < text_vma_lo) {
+                text_vma_lo = addr;
+            }
+            if (addr + size > text_vma_hi) {
+                text_vma_hi = addr + size;
+            }
+        } else {
+            if (addr < data_vma_lo) {
+                data_vma_lo = addr;
+            }
+            if (addr + size > data_vma_hi) {
+                data_vma_hi = addr + size;
+            }
+        }
     }
 
     /* Calculate sizes */
@@ -296,8 +344,8 @@ esp_err_t elf_loader_calculate_memory_layout(elf_loader_ctx_t *ctx,
         ctx->data_size = 0;
     }
 
-    ESP_LOGI(TAG, "Memory layout: unified vma=0x%x size=%zu, text=%zu, data=%zu",
-             vma_min, total_size, ctx->text_size, ctx->data_size);
+    ESP_LOGI(TAG, "Memory layout: unified vma=0x%x size=%u, text=%u, data=%u",
+             (unsigned)vma_min, (unsigned)total_size, (unsigned)ctx->text_size, (unsigned)ctx->data_size);
 
     /* Return values if requested (unified layout for API compatibility) */
     if (ram_size_out) {
@@ -342,8 +390,8 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
         ctx->split_alloc = true;
         ctx->ram_base = ctx->data_base;  /* Legacy compatibility */
 
-        ESP_LOGI(TAG, "Split allocation: text=%zu bytes at %p, data=%zu bytes at %p",
-                 ctx->text_size, ctx->text_base, ctx->data_size, ctx->data_base);
+        ESP_LOGD(TAG, "Split allocation: text=%u bytes at %p, data=%u bytes at %p",
+                 (unsigned)ctx->text_size, ctx->text_base, (unsigned)ctx->data_size, ctx->data_base);
     } else {
         /* Unified allocation: single contiguous block */
         err = elf_port_alloc(ctx->ram_size, ctx->heap_caps,
@@ -356,7 +404,7 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
         ctx->text_base = ctx->ram_base;
         ctx->data_base = ctx->ram_base;
 
-        ESP_LOGI(TAG, "Unified allocation: %zu bytes at %p", ctx->ram_size, ctx->ram_base);
+        ESP_LOGD(TAG, "Unified allocation: %u bytes at %p", (unsigned)ctx->ram_size, ctx->ram_base);
     }
 
     return ESP_OK;
@@ -380,90 +428,129 @@ esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
     }
 
     elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
+    int items_loaded = 0;
 
-    /* Load segments (PT_LOAD) to appropriate memory regions
-     * Using segments ensures we handle all loadable content correctly */
-    elf_iterator_handle_t it;
-    elf_parser_get_segments_it(parser, &it);
+    if (ctx->split_alloc) {
+        /* Split allocation: load each section individually based on name
+         * This is needed because .rodata must go to DRAM even though it's
+         * in an executable segment (ESP32 IRAM doesn't support byte access) */
+        elf_iterator_handle_t sec_it;
+        elf_parser_get_sections_it(parser, &sec_it);
 
-    elf_segment_handle_t seg;
-    int segments_loaded = 0;
+        elf_section_handle_t sec;
+        while (elf_section_next(parser, &sec_it, &sec)) {
+            uint32_t sec_type = elf_section_get_type(sec);
+            uintptr_t addr = elf_section_get_addr(sec);
+            uint32_t size = elf_section_get_size(sec);
+            uintptr_t file_offset = elf_section_get_offset(sec);
 
-    while (elf_segment_next(parser, &it, &seg)) {
-        uint32_t type = elf_segment_get_type(seg);
-        if (type != PT_LOAD) {
-            continue;
-        }
+            /* Only load allocatable sections with content */
+            if (sec_type != SHT_PROGBITS && sec_type != SHT_NOBITS) {
+                continue;
+            }
+            if (size == 0 || addr < ctx->vma_base) {
+                continue;
+            }
 
-        uintptr_t vaddr = elf_segment_get_vaddr(seg);
-        size_t filesz = elf_segment_get_filesz(seg);
-        size_t memsz = elf_segment_get_memsz(seg);
-        uintptr_t file_offset = elf_segment_get_offset(seg);
-        uint32_t flags = elf_segment_get_flags(seg);
+            char sec_name[32];
+            if (elf_section_get_name(sec, sec_name, sizeof(sec_name)) != ESP_OK) {
+                continue;
+            }
 
-        if (memsz == 0) {
-            continue;
-        }
+            /* Classify based on section name */
+            bool is_text = is_text_section(sec_name);
 
-        /* Determine destination based on segment type and allocation mode */
-        void *dest;
-        bool is_text = (flags & PF_X) != 0;
-
-        if (ctx->split_alloc) {
+            /* Determine destination */
+            void *dest;
             if (is_text) {
-                /* Executable segment -> text region */
-                uintptr_t offset = vaddr - ctx->text_vma_lo;
+                uintptr_t offset = addr - ctx->text_vma_lo;
                 dest = (uint8_t *)ctx->text_base + offset;
             } else {
-                /* Non-executable segment -> data region */
-                uintptr_t offset = vaddr - ctx->data_vma_lo;
+                uintptr_t offset = addr - ctx->data_vma_lo;
                 dest = (uint8_t *)ctx->data_base + offset;
             }
-        } else {
-            /* Unified allocation */
+
+            /* Copy or zero-fill */
+            if (sec_type == SHT_PROGBITS) {
+                const void *src = (const uint8_t *)ctx->elf_data + file_offset;
+
+                if (is_text) {
+                    memcpy_word_aligned(dest, src, size);
+                } else {
+                    memcpy(dest, src, size);
+                }
+
+                ESP_LOGD(TAG, "Loaded section %s: addr=0x%x size=0x%x -> %p (%s)",
+                         sec_name, (unsigned)addr, (unsigned)size, dest,
+                         is_text ? "text" : "data");
+            } else if (sec_type == SHT_NOBITS) {
+                /* BSS - zero fill */
+                if (is_text) {
+                    memset_word_aligned(dest, 0, size);
+                } else {
+                    memset(dest, 0, size);
+                }
+
+                ESP_LOGD(TAG, "Zeroed section %s: addr=0x%x size=0x%x -> %p (%s)",
+                         sec_name, (unsigned)addr, (unsigned)size, dest,
+                         is_text ? "text" : "data");
+            }
+
+            items_loaded++;
+        }
+    } else {
+        /* Unified allocation: load entire segments (original behavior) */
+        elf_iterator_handle_t seg_it;
+        elf_parser_get_segments_it(parser, &seg_it);
+
+        elf_segment_handle_t seg;
+        while (elf_segment_next(parser, &seg_it, &seg)) {
+            uint32_t type = elf_segment_get_type(seg);
+            if (type != PT_LOAD) {
+                continue;
+            }
+
+            uintptr_t vaddr = elf_segment_get_vaddr(seg);
+            size_t filesz = elf_segment_get_filesz(seg);
+            size_t memsz = elf_segment_get_memsz(seg);
+            uintptr_t file_offset = elf_segment_get_offset(seg);
+
+            if (memsz == 0) {
+                continue;
+            }
+
+            /* Unified allocation - single destination */
             uintptr_t offset = vaddr - ctx->vma_base;
-            dest = (uint8_t *)ctx->ram_base + offset;
-        }
+            void *dest = (uint8_t *)ctx->ram_base + offset;
 
-        /* Copy file content to memory */
-        if (filesz > 0) {
-            const void *src = (const uint8_t *)ctx->elf_data + file_offset;
-
-            /* Use word-aligned copy for text sections (IRAM on ESP32 requires 32-bit access)
-             * Use regular memcpy for data sections (byte-addressable DRAM) */
-            if (is_text || !ctx->split_alloc) {
+            /* Copy file content to memory */
+            if (filesz > 0) {
+                const void *src = (const uint8_t *)ctx->elf_data + file_offset;
                 memcpy_word_aligned(dest, src, filesz);
-            } else {
-                memcpy(dest, src, filesz);
+
+                ESP_LOGD(TAG, "Loaded segment: vaddr=0x%x filesz=0x%x -> %p",
+                         (unsigned)vaddr, (unsigned)filesz, dest);
             }
 
-            ESP_LOGD(TAG, "Loaded segment: vaddr=0x%x filesz=0x%x%s -> %p",
-                     vaddr, filesz, is_text ? " (text)" : " (data)", dest);
-        }
-
-        /* Zero-fill the remainder (memsz > filesz, typically .bss part) */
-        if (memsz > filesz) {
-            void *bss_dest = (uint8_t *)dest + filesz;
-            size_t bss_size = memsz - filesz;
-
-            if (is_text || !ctx->split_alloc) {
+            /* Zero-fill the remainder (memsz > filesz, typically .bss) */
+            if (memsz > filesz) {
+                void *bss_dest = (uint8_t *)dest + filesz;
+                size_t bss_size = memsz - filesz;
                 memset_word_aligned(bss_dest, 0, bss_size);
-            } else {
-                memset(bss_dest, 0, bss_size);
+
+                ESP_LOGD(TAG, "Zeroed BSS: vaddr=0x%x size=0x%x -> %p",
+                         (unsigned)(vaddr + filesz), (unsigned)bss_size, bss_dest);
             }
 
-            ESP_LOGD(TAG, "Zeroed BSS: vaddr=0x%x size=0x%x -> %p",
-                     vaddr + filesz, bss_size, bss_dest);
+            items_loaded++;
         }
-
-        segments_loaded++;
     }
 
     if (ctx->split_alloc) {
-        ESP_LOGI(TAG, "Loaded %d segments: text at %p, data at %p",
-                 segments_loaded, ctx->text_base, ctx->data_base);
+        ESP_LOGI(TAG, "Loaded %d sections: text at %p, data at %p",
+                 items_loaded, ctx->text_base, ctx->data_base);
     } else {
-        ESP_LOGI(TAG, "Loaded %d segments into RAM at %p", segments_loaded, ctx->ram_base);
+        ESP_LOGI(TAG, "Loaded %d segments into RAM at %p", items_loaded, ctx->ram_base);
     }
 
     return ESP_OK;
