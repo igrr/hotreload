@@ -89,6 +89,22 @@ static void memset_word_aligned(void *dest, int val, size_t n)
     }
 }
 
+/**
+ * Check if a section should be placed in the text (executable) region
+ *
+ * For ESP32 split allocation, only actual code sections go to IRAM.
+ * All other sections (rodata, data, bss, got, etc.) go to DRAM for byte access.
+ *
+ * @param section_name The section name (e.g., ".text", ".rodata")
+ * @return true if section should go to text region (IRAM), false for data region (DRAM)
+ */
+static bool is_text_section(const char *section_name)
+{
+    /* Only .text and .plt sections contain executable code */
+    return (strcmp(section_name, ".text") == 0 ||
+            strcmp(section_name, ".plt") == 0);
+}
+
 /* Read callback for elf_parser - reads from memory-mapped ELF data */
 static size_t elf_loader_read_cb(void *user_ctx, size_t offset, size_t n_bytes, void *dest)
 {
@@ -197,62 +213,141 @@ esp_err_t elf_loader_calculate_memory_layout(elf_loader_ctx_t *ctx,
 
     elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
 
-    /* Find the lowest and highest VMA among ALLOC sections */
+    /* Track VMA ranges for unified allocation (overall) and split allocation */
     uintptr_t vma_min = UINTPTR_MAX;
     uintptr_t vma_max = 0;
-    bool found_alloc_section = false;
 
-    elf_iterator_handle_t it;
-    elf_parser_get_sections_it(parser, &it);
+    /* Split allocation: separate text (executable code) and data regions
+     * Classification is based on section names, not segment flags, because
+     * on ESP32 we need .rodata in DRAM (byte-addressable) even though it's
+     * in an executable segment. */
+    uintptr_t text_vma_lo = UINTPTR_MAX;
+    uintptr_t text_vma_hi = 0;
+    uintptr_t data_vma_lo = UINTPTR_MAX;
+    uintptr_t data_vma_hi = 0;
 
-    elf_section_handle_t section;
-    while (elf_section_next(parser, &it, &section)) {
-        uint32_t type = elf_section_get_type(section);
+    bool found_loadable = false;
 
-        /* Skip non-allocated sections (debug info, symbol tables, etc.)
-         * We need to check section flags, but elf_parser doesn't expose that yet
-         * For now, check section types that are typically loaded:
-         * SHT_PROGBITS (1), SHT_NOBITS (8) */
-        if (type != SHT_PROGBITS && type != SHT_NOBITS) {
+    /* First pass: use PT_LOAD segments for overall VMA range (unified allocation) */
+    elf_iterator_handle_t seg_it;
+    elf_parser_get_segments_it(parser, &seg_it);
+
+    elf_segment_handle_t seg;
+    while (elf_segment_next(parser, &seg_it, &seg)) {
+        uint32_t type = elf_segment_get_type(seg);
+        if (type != PT_LOAD) {
             continue;
         }
 
-        uintptr_t addr = elf_section_get_addr(section);
-        uint32_t size = elf_section_get_size(section);
+        uintptr_t vaddr = elf_segment_get_vaddr(seg);
+        size_t memsz = elf_segment_get_memsz(seg);
 
-        /* Skip sections with address 0 (usually not loadable) */
-        if (addr == 0) {
+        if (memsz == 0) {
             continue;
         }
 
-        ESP_LOGD(TAG, "Section: addr=0x%x size=0x%x type=%d", addr, size, type);
+        found_loadable = true;
 
-        found_alloc_section = true;
-
-        if (addr < vma_min) {
-            vma_min = addr;
+        /* Update overall range (for unified allocation) */
+        if (vaddr < vma_min) {
+            vma_min = vaddr;
         }
-        if (addr + size > vma_max) {
-            vma_max = addr + size;
+        if (vaddr + memsz > vma_max) {
+            vma_max = vaddr + memsz;
         }
     }
 
-    if (!found_alloc_section) {
-        ESP_LOGE(TAG, "No loadable sections found");
+    if (!found_loadable) {
+        ESP_LOGE(TAG, "No loadable segments found");
         return ESP_ERR_NOT_FOUND;
     }
 
-    /* Calculate total size preserving VMA layout */
+    /* Second pass: iterate sections to classify into text vs data regions
+     * This is needed for split allocation where .rodata must go to DRAM
+     * even though it's in an executable segment */
+    elf_iterator_handle_t sec_it;
+    elf_parser_get_sections_it(parser, &sec_it);
+
+    elf_section_handle_t sec;
+    while (elf_section_next(parser, &sec_it, &sec)) {
+        uint32_t sec_type = elf_section_get_type(sec);
+
+        /* Only consider allocatable sections (SHT_PROGBITS, SHT_NOBITS) */
+        if (sec_type != SHT_PROGBITS && sec_type != SHT_NOBITS &&
+            sec_type != SHT_DYNAMIC && sec_type != SHT_DYNSYM &&
+            sec_type != SHT_HASH && sec_type != SHT_STRTAB &&
+            sec_type != SHT_RELA && sec_type != SHT_REL) {
+            continue;
+        }
+
+        uintptr_t addr = elf_section_get_addr(sec);
+        uint32_t size = elf_section_get_size(sec);
+
+        /* Skip sections not in the loadable range or zero-sized */
+        if (size == 0 || addr < vma_min || addr >= vma_max) {
+            continue;
+        }
+
+        char sec_name[32];
+        if (elf_section_get_name(sec, sec_name, sizeof(sec_name)) != ESP_OK) {
+            continue;
+        }
+
+        /* Classify based on section name */
+        bool is_text = is_text_section(sec_name);
+
+        ESP_LOGD(TAG, "Section %s: addr=0x%x size=0x%x -> %s",
+                 sec_name, addr, size, is_text ? "text" : "data");
+
+        if (is_text) {
+            if (addr < text_vma_lo) {
+                text_vma_lo = addr;
+            }
+            if (addr + size > text_vma_hi) {
+                text_vma_hi = addr + size;
+            }
+        } else {
+            if (addr < data_vma_lo) {
+                data_vma_lo = addr;
+            }
+            if (addr + size > data_vma_hi) {
+                data_vma_hi = addr + size;
+            }
+        }
+    }
+
+    /* Calculate sizes */
     size_t total_size = vma_max - vma_min;
 
-    ESP_LOGI(TAG, "Memory layout: vma_base=0x%x, size=0x%x (%d bytes)",
-             vma_min, total_size, total_size);
-
-    /* Store in context */
+    /* Store unified layout */
     ctx->vma_base = vma_min;
     ctx->ram_size = total_size;
 
-    /* Return values if requested */
+    /* Store split layout */
+    if (text_vma_lo != UINTPTR_MAX) {
+        ctx->text_vma_lo = text_vma_lo;
+        ctx->text_vma_hi = text_vma_hi;
+        ctx->text_size = text_vma_hi - text_vma_lo;
+    } else {
+        ctx->text_vma_lo = 0;
+        ctx->text_vma_hi = 0;
+        ctx->text_size = 0;
+    }
+
+    if (data_vma_lo != UINTPTR_MAX) {
+        ctx->data_vma_lo = data_vma_lo;
+        ctx->data_vma_hi = data_vma_hi;
+        ctx->data_size = data_vma_hi - data_vma_lo;
+    } else {
+        ctx->data_vma_lo = 0;
+        ctx->data_vma_hi = 0;
+        ctx->data_size = 0;
+    }
+
+    ESP_LOGI(TAG, "Memory layout: unified vma=0x%x size=%u, text=%u, data=%u",
+             (unsigned)vma_min, (unsigned)total_size, (unsigned)ctx->text_size, (unsigned)ctx->data_size);
+
+    /* Return values if requested (unified layout for API compatibility) */
     if (ram_size_out) {
         *ram_size_out = total_size;
     }
@@ -275,14 +370,42 @@ esp_err_t elf_loader_allocate(elf_loader_ctx_t *ctx)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Use port layer for allocation */
-    esp_err_t err = elf_port_alloc(ctx->ram_size, ctx->heap_caps,
-                                   &ctx->ram_base, &ctx->mem_ctx);
-    if (err != ESP_OK) {
-        return err;
-    }
+    esp_err_t err;
 
-    ESP_LOGI(TAG, "Allocated %zu bytes at %p for ELF loading", ctx->ram_size, ctx->ram_base);
+    /* Check if this chip requires split text/data allocation */
+    if (elf_port_requires_split_alloc()) {
+        /* Split allocation: separate text (IRAM) and data (DRAM) regions */
+        if (ctx->text_size == 0 && ctx->data_size == 0) {
+            ESP_LOGE(TAG, "Split allocation required but no text/data sizes calculated");
+            return ESP_ERR_INVALID_STATE;
+        }
+
+        err = elf_port_alloc_split(ctx->text_size, ctx->data_size, ctx->heap_caps,
+                                    &ctx->text_base, &ctx->data_base,
+                                    &ctx->text_mem_ctx, &ctx->mem_ctx);
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        ctx->split_alloc = true;
+        ctx->ram_base = ctx->data_base;  /* Legacy compatibility */
+
+        ESP_LOGD(TAG, "Split allocation: text=%u bytes at %p, data=%u bytes at %p",
+                 (unsigned)ctx->text_size, ctx->text_base, (unsigned)ctx->data_size, ctx->data_base);
+    } else {
+        /* Unified allocation: single contiguous block */
+        err = elf_port_alloc(ctx->ram_size, ctx->heap_caps,
+                             &ctx->ram_base, &ctx->mem_ctx);
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        ctx->split_alloc = false;
+        ctx->text_base = ctx->ram_base;
+        ctx->data_base = ctx->ram_base;
+
+        ESP_LOGD(TAG, "Unified allocation: %u bytes at %p", (unsigned)ctx->ram_size, ctx->ram_base);
+    }
 
     return ESP_OK;
 }
@@ -294,62 +417,141 @@ esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
     }
 
     /* Memory must be allocated first */
-    if (ctx->ram_base == NULL) {
+    if (ctx->ram_base == NULL && !ctx->split_alloc) {
         ESP_LOGE(TAG, "RAM not allocated");
         return ESP_ERR_INVALID_STATE;
     }
 
-    elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
-
-    /* Iterate through sections and load PROGBITS/NOBITS with ALLOC flag */
-    elf_iterator_handle_t it;
-    elf_parser_get_sections_it(parser, &it);
-
-    elf_section_handle_t section;
-    int sections_loaded = 0;
-
-    while (elf_section_next(parser, &it, &section)) {
-        uint32_t type = elf_section_get_type(section);
-
-        /* Only load PROGBITS and NOBITS sections */
-        if (type != SHT_PROGBITS && type != SHT_NOBITS) {
-            continue;
-        }
-
-        uintptr_t vma = elf_section_get_addr(section);
-        uint32_t size = elf_section_get_size(section);
-
-        /* Skip sections with address 0 (not loadable) */
-        if (vma == 0) {
-            continue;
-        }
-
-        /* Calculate destination in RAM */
-        uintptr_t ram_offset = vma - ctx->vma_base;
-        void *dest = (uint8_t *)ctx->ram_base + ram_offset;
-
-        if (type == SHT_PROGBITS) {
-            /* Copy section data from ELF to RAM
-             * Use word-aligned copy for IRAM compatibility (IRAM requires 32-bit access) */
-            uintptr_t file_offset = elf_section_get_offset(section);
-            const void *src = (const uint8_t *)ctx->elf_data + file_offset;
-            memcpy_word_aligned(dest, src, size);
-
-            ESP_LOGD(TAG, "Loaded section: vma=0x%x size=0x%x offset=0x%x -> %p",
-                     vma, size, file_offset, dest);
-        } else {
-            /* NOBITS section (.bss) - zero the memory
-             * Use word-aligned memset for IRAM compatibility */
-            memset_word_aligned(dest, 0, size);
-
-            ESP_LOGD(TAG, "Zeroed BSS section: vma=0x%x size=0x%x -> %p",
-                     vma, size, dest);
-        }
-
-        sections_loaded++;
+    if (ctx->split_alloc && ctx->text_base == NULL && ctx->data_base == NULL) {
+        ESP_LOGE(TAG, "Split allocation regions not allocated");
+        return ESP_ERR_INVALID_STATE;
     }
 
-    ESP_LOGI(TAG, "Loaded %d sections into RAM at %p", sections_loaded, ctx->ram_base);
+    elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
+    int items_loaded = 0;
+
+    if (ctx->split_alloc) {
+        /* Split allocation: load each section individually based on name
+         * This is needed because .rodata must go to DRAM even though it's
+         * in an executable segment (ESP32 IRAM doesn't support byte access) */
+        elf_iterator_handle_t sec_it;
+        elf_parser_get_sections_it(parser, &sec_it);
+
+        elf_section_handle_t sec;
+        while (elf_section_next(parser, &sec_it, &sec)) {
+            uint32_t sec_type = elf_section_get_type(sec);
+            uintptr_t addr = elf_section_get_addr(sec);
+            uint32_t size = elf_section_get_size(sec);
+            uintptr_t file_offset = elf_section_get_offset(sec);
+
+            /* Only load allocatable sections with content */
+            if (sec_type != SHT_PROGBITS && sec_type != SHT_NOBITS) {
+                continue;
+            }
+            if (size == 0 || addr < ctx->vma_base) {
+                continue;
+            }
+
+            char sec_name[32];
+            if (elf_section_get_name(sec, sec_name, sizeof(sec_name)) != ESP_OK) {
+                continue;
+            }
+
+            /* Classify based on section name */
+            bool is_text = is_text_section(sec_name);
+
+            /* Determine destination */
+            void *dest;
+            if (is_text) {
+                uintptr_t offset = addr - ctx->text_vma_lo;
+                dest = (uint8_t *)ctx->text_base + offset;
+            } else {
+                uintptr_t offset = addr - ctx->data_vma_lo;
+                dest = (uint8_t *)ctx->data_base + offset;
+            }
+
+            /* Copy or zero-fill */
+            if (sec_type == SHT_PROGBITS) {
+                const void *src = (const uint8_t *)ctx->elf_data + file_offset;
+
+                if (is_text) {
+                    memcpy_word_aligned(dest, src, size);
+                } else {
+                    memcpy(dest, src, size);
+                }
+
+                ESP_LOGD(TAG, "Loaded section %s: addr=0x%x size=0x%x -> %p (%s)",
+                         sec_name, (unsigned)addr, (unsigned)size, dest,
+                         is_text ? "text" : "data");
+            } else if (sec_type == SHT_NOBITS) {
+                /* BSS - zero fill */
+                if (is_text) {
+                    memset_word_aligned(dest, 0, size);
+                } else {
+                    memset(dest, 0, size);
+                }
+
+                ESP_LOGD(TAG, "Zeroed section %s: addr=0x%x size=0x%x -> %p (%s)",
+                         sec_name, (unsigned)addr, (unsigned)size, dest,
+                         is_text ? "text" : "data");
+            }
+
+            items_loaded++;
+        }
+    } else {
+        /* Unified allocation: load entire segments (original behavior) */
+        elf_iterator_handle_t seg_it;
+        elf_parser_get_segments_it(parser, &seg_it);
+
+        elf_segment_handle_t seg;
+        while (elf_segment_next(parser, &seg_it, &seg)) {
+            uint32_t type = elf_segment_get_type(seg);
+            if (type != PT_LOAD) {
+                continue;
+            }
+
+            uintptr_t vaddr = elf_segment_get_vaddr(seg);
+            size_t filesz = elf_segment_get_filesz(seg);
+            size_t memsz = elf_segment_get_memsz(seg);
+            uintptr_t file_offset = elf_segment_get_offset(seg);
+
+            if (memsz == 0) {
+                continue;
+            }
+
+            /* Unified allocation - single destination */
+            uintptr_t offset = vaddr - ctx->vma_base;
+            void *dest = (uint8_t *)ctx->ram_base + offset;
+
+            /* Copy file content to memory */
+            if (filesz > 0) {
+                const void *src = (const uint8_t *)ctx->elf_data + file_offset;
+                memcpy_word_aligned(dest, src, filesz);
+
+                ESP_LOGD(TAG, "Loaded segment: vaddr=0x%x filesz=0x%x -> %p",
+                         (unsigned)vaddr, (unsigned)filesz, dest);
+            }
+
+            /* Zero-fill the remainder (memsz > filesz, typically .bss) */
+            if (memsz > filesz) {
+                void *bss_dest = (uint8_t *)dest + filesz;
+                size_t bss_size = memsz - filesz;
+                memset_word_aligned(bss_dest, 0, bss_size);
+
+                ESP_LOGD(TAG, "Zeroed BSS: vaddr=0x%x size=0x%x -> %p",
+                         (unsigned)(vaddr + filesz), (unsigned)bss_size, bss_dest);
+            }
+
+            items_loaded++;
+        }
+    }
+
+    if (ctx->split_alloc) {
+        ESP_LOGI(TAG, "Loaded %d sections: text at %p, data at %p",
+                 items_loaded, ctx->text_base, ctx->data_base);
+    } else {
+        ESP_LOGI(TAG, "Loaded %d segments into RAM at %p", items_loaded, ctx->ram_base);
+    }
 
     return ESP_OK;
 }
@@ -360,30 +562,65 @@ esp_err_t elf_loader_apply_relocations(elf_loader_ctx_t *ctx)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (ctx->ram_base == NULL) {
+    if (!ctx->split_alloc && ctx->ram_base == NULL) {
         ESP_LOGE(TAG, "RAM not allocated");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (ctx->split_alloc && ctx->text_base == NULL && ctx->data_base == NULL) {
+        ESP_LOGE(TAG, "Split allocation regions not allocated");
         return ESP_ERR_INVALID_STATE;
     }
 
     elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
 
-    /* Calculate load base: where sections were actually loaded
-     * load_base = ram_base - vma_base (adjust for VMA offset) */
-    uintptr_t load_base = (uintptr_t)ctx->ram_base - ctx->vma_base;
+    /* Populate memory context with split allocation info for relocation handlers */
+    if (ctx->split_alloc) {
+        ctx->mem_ctx.split_alloc = true;
+        ctx->mem_ctx.text_load_base = (uintptr_t)ctx->text_base - ctx->text_vma_lo;
+        ctx->mem_ctx.text_vma_lo = ctx->text_vma_lo;
+        ctx->mem_ctx.text_vma_hi = ctx->text_vma_hi;
+        ctx->mem_ctx.data_load_base = (uintptr_t)ctx->data_base - ctx->data_vma_lo;
+        ctx->mem_ctx.data_vma_lo = ctx->data_vma_lo;
+        ctx->mem_ctx.data_vma_hi = ctx->data_vma_hi;
+    } else {
+        ctx->mem_ctx.split_alloc = false;
+    }
+
+    /* Calculate load base for unified allocation, or use data region for split */
+    uintptr_t load_base;
+    void *ram_base;
+
+    if (ctx->split_alloc) {
+        /* For split allocation, pass text region as primary for relocations
+         * since most PC-relative relocations are in text.
+         * The mem_ctx contains info for both regions. */
+        ram_base = ctx->text_base;
+        load_base = ctx->mem_ctx.text_load_base;
+    } else {
+        ram_base = ctx->ram_base;
+        load_base = (uintptr_t)ctx->ram_base - ctx->vma_base;
+    }
 
     /* Call post-load fixups (e.g., PLT patching on RISC-V with I/D offset)
      * This must be done before processing relocations since PLT entries
-     * will be used when calling external functions. */
-    esp_err_t err = elf_port_post_load(parser, ctx->ram_base, load_base,
-                                       ctx->vma_base, &ctx->mem_ctx);
+     * will be used when calling external functions.
+     * PLT is in the text region, so pass text base and load_base. */
+    esp_err_t err = elf_port_post_load(parser, ram_base, load_base,
+                                       ctx->split_alloc ? ctx->text_vma_lo : ctx->vma_base,
+                                       &ctx->mem_ctx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Post-load fixups failed: %d", err);
         return err;
     }
 
-    /* Apply architecture-specific relocations via port layer */
-    err = elf_port_apply_relocations(parser, ctx->ram_base, load_base,
-                                     ctx->vma_base, ctx->ram_size, &ctx->mem_ctx);
+    /* Apply architecture-specific relocations via port layer
+     * The memory context contains split allocation info that relocation
+     * handlers can use to compute correct addresses for each region. */
+    err = elf_port_apply_relocations(parser, ram_base, load_base,
+                                     ctx->split_alloc ? ctx->text_vma_lo : ctx->vma_base,
+                                     ctx->split_alloc ? ctx->text_size : ctx->ram_size,
+                                     &ctx->mem_ctx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Relocation processing failed: %d", err);
         return err;
@@ -398,13 +635,34 @@ esp_err_t elf_loader_sync_cache(elf_loader_ctx_t *ctx)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (ctx->ram_base == NULL || ctx->ram_size == 0) {
-        ESP_LOGE(TAG, "No loaded data to sync");
-        return ESP_ERR_INVALID_STATE;
+    esp_err_t err;
+
+    if (ctx->split_alloc) {
+        /* Sync both text and data regions */
+        if (ctx->text_base != NULL && ctx->text_size > 0) {
+            err = elf_port_sync_cache(ctx->text_base, ctx->text_size);
+            if (err != ESP_OK) {
+                return err;
+            }
+        }
+        if (ctx->data_base != NULL && ctx->data_size > 0) {
+            err = elf_port_sync_cache(ctx->data_base, ctx->data_size);
+            if (err != ESP_OK) {
+                return err;
+            }
+        }
+    } else {
+        if (ctx->ram_base == NULL || ctx->ram_size == 0) {
+            ESP_LOGE(TAG, "No loaded data to sync");
+            return ESP_ERR_INVALID_STATE;
+        }
+        err = elf_port_sync_cache(ctx->ram_base, ctx->ram_size);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
 
-    /* Use port layer for cache sync */
-    return elf_port_sync_cache(ctx->ram_base, ctx->ram_size);
+    return ESP_OK;
 }
 
 void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
@@ -413,14 +671,19 @@ void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
         return NULL;
     }
 
-    if (ctx->parser == NULL || ctx->ram_base == NULL) {
+    if (ctx->parser == NULL) {
+        return NULL;
+    }
+
+    /* Check allocation state */
+    if (!ctx->split_alloc && ctx->ram_base == NULL) {
+        return NULL;
+    }
+    if (ctx->split_alloc && ctx->text_base == NULL && ctx->data_base == NULL) {
         return NULL;
     }
 
     elf_parser_handle_t parser = (elf_parser_handle_t)ctx->parser;
-
-    /* Calculate load base for address adjustment */
-    uintptr_t load_base = (uintptr_t)ctx->ram_base - ctx->vma_base;
 
     /* Iterate through symbols to find the one with matching name */
     elf_iterator_handle_t it;
@@ -444,17 +707,32 @@ void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
                 continue;
             }
 
-            /* Calculate data bus address */
-            uintptr_t data_addr = load_base + sym_value;
+            /* Calculate data bus address based on allocation mode */
+            uintptr_t data_addr;
+            if (ctx->split_alloc) {
+                /* Determine which region the symbol belongs to */
+                if (sym_value >= ctx->text_vma_lo && sym_value < ctx->text_vma_hi) {
+                    /* Symbol in text region */
+                    data_addr = (uintptr_t)ctx->text_base + (sym_value - ctx->text_vma_lo);
+                } else {
+                    /* Symbol in data region */
+                    data_addr = (uintptr_t)ctx->data_base + (sym_value - ctx->data_vma_lo);
+                }
+            } else {
+                uintptr_t load_base = (uintptr_t)ctx->ram_base - ctx->vma_base;
+                data_addr = load_base + sym_value;
+            }
 
             /* For function symbols, convert to instruction bus address.
              * This is required on chips with separate data/instruction address
              * spaces (ESP32-C2/C3 with SOC_I_D_OFFSET, ESP32-S2/S3 with PSRAM).
-             * Data symbols should keep their data bus address. */
+             * Data symbols should keep their data bus address.
+             * For ESP32 with split allocation, text is already in IRAM, so no
+             * translation is needed (elf_port_to_exec_addr returns same address). */
             uint8_t sym_type = elf_symbol_get_type(sym);
             uintptr_t result_addr;
             if (sym_type == STT_FUNC) {
-                result_addr = elf_port_to_exec_addr(&ctx->mem_ctx, data_addr);
+                result_addr = elf_port_to_exec_addr(&ctx->text_mem_ctx, data_addr);
                 ESP_LOGD(TAG, "Function '%s': data=%p -> exec=%p",
                          name, (void *)data_addr, (void *)result_addr);
             } else {
@@ -477,7 +755,10 @@ void elf_loader_cleanup(elf_loader_ctx_t *ctx)
     }
 
     /* Use port layer to free memory and clean up any platform-specific state */
-    if (ctx->ram_base) {
+    if (ctx->split_alloc) {
+        elf_port_free_split(ctx->text_base, ctx->data_base,
+                            &ctx->text_mem_ctx, &ctx->mem_ctx);
+    } else if (ctx->ram_base) {
         elf_port_free(ctx->ram_base, &ctx->mem_ctx);
     }
 

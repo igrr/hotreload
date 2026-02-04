@@ -153,6 +153,40 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
     }
 }
 
+/**
+ * @brief Helper to check if a VMA is in the text region (for split allocation)
+ */
+static inline bool vma_in_text(const elf_port_mem_ctx_t *ctx, uintptr_t vma)
+{
+    if (!ctx->split_alloc) {
+        return true;  /* For unified, treat all as "text" */
+    }
+    return vma >= ctx->text_vma_lo && vma < ctx->text_vma_hi;
+}
+
+/**
+ * @brief Helper to get the load_base for a given VMA (for split allocation)
+ */
+static inline uintptr_t get_load_base_for_vma(const elf_port_mem_ctx_t *ctx,
+                                               uintptr_t vma,
+                                               uintptr_t unified_load_base)
+{
+    if (!ctx->split_alloc) {
+        return unified_load_base;
+    }
+    return vma_in_text(ctx, vma) ? ctx->text_load_base : ctx->data_load_base;
+}
+
+/**
+ * @brief Helper to compute RAM address for a VMA (for split allocation)
+ */
+static inline uintptr_t vma_to_ram(const elf_port_mem_ctx_t *ctx,
+                                    uintptr_t vma,
+                                    uintptr_t unified_load_base)
+{
+    return get_load_base_for_vma(ctx, vma, unified_load_base) + vma;
+}
+
 esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                                      void *ram_base,
                                      uintptr_t load_base,
@@ -160,7 +194,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                                      size_t ram_size,
                                      const elf_port_mem_ctx_t *mem_ctx)
 {
-    (void)mem_ctx;  /* Not used for Xtensa */
+    (void)ram_base;  /* We use mem_ctx for split allocation info */
 
     /* Iterate through RELA relocations */
     elf_iterator_handle_t it;
@@ -169,6 +203,18 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
     elf_relocation_a_handle_t rela;
     int reloc_count = 0;
     int applied_count = 0;
+
+    /* For split allocation, we need to handle relocations in both regions */
+    uintptr_t vma_end;
+    if (mem_ctx->split_alloc) {
+        /* Check all VMAs across both regions */
+        vma_end = (mem_ctx->text_vma_hi > mem_ctx->data_vma_hi) ?
+                   mem_ctx->text_vma_hi : mem_ctx->data_vma_hi;
+        vma_base = (mem_ctx->text_vma_lo < mem_ctx->data_vma_lo) ?
+                    mem_ctx->text_vma_lo : mem_ctx->data_vma_lo;
+    } else {
+        vma_end = vma_base + ram_size;
+    }
 
     while (elf_reloc_a_next(parser, &it, &rela)) {
         reloc_count++;
@@ -181,31 +227,36 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                  reloc_count, offset, type, addend);
 
         /* Check if offset is within our loaded section range */
-        if (offset < vma_base || offset >= vma_base + ram_size) {
+        if (offset < vma_base || offset >= vma_end) {
             ESP_LOGD(TAG, "Skipping relocation outside loaded range: offset=0x%x", offset);
             continue;
         }
 
         /* Calculate location in RAM to patch
          * offset is the VMA where the relocation applies */
-        uintptr_t location_addr = load_base + offset;
+        uintptr_t location_addr = vma_to_ram(mem_ctx, offset, load_base);
         uint32_t *location = (uint32_t *)location_addr;
 
         switch (type) {
-            case R_XTENSA_RELATIVE:
-                /* Formula: *location = load_base + addend */
-                *location = (uint32_t)(load_base + addend);
+            case R_XTENSA_RELATIVE: {
+                /* Formula: *location = load_base + addend
+                 * For split allocation, addend is a VMA, so we need to determine
+                 * which region it belongs to */
+                uintptr_t result_addr = vma_to_ram(mem_ctx, addend, load_base);
+                *location = (uint32_t)result_addr;
                 applied_count++;
-                ESP_LOGV(TAG, "R_XTENSA_RELATIVE: offset=0x%x -> 0x%x",
-                         offset, *location);
+                ESP_LOGV(TAG, "R_XTENSA_RELATIVE: offset=0x%x addend=0x%x -> 0x%x",
+                         offset, addend, *location);
                 break;
+            }
 
             case R_XTENSA_32: {
                 /* Formula: *location = symbol_value + addend
                  * symbol_value from elf_parser is the original VMA */
                 uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
-                /* Adjust for load base */
-                *location = (uint32_t)(load_base + sym_val + addend);
+                /* For split allocation, compute address based on which region symbol is in */
+                uintptr_t result_addr = vma_to_ram(mem_ctx, sym_val + addend, load_base);
+                *location = (uint32_t)result_addr;
                 applied_count++;
                 ESP_LOGV(TAG, "R_XTENSA_32: offset=0x%x sym_val=0x%x -> 0x%x",
                          offset, sym_val, *location);
@@ -233,14 +284,14 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
             case R_XTENSA_SLOT0_OP: {
                 /* Xtensa instruction-specific relocation for L32R, CALL, J instructions
                  *
-                 * IMPORTANT: Since we preserve the VMA layout (all sections maintain
-                 * their relative positions), PC-relative instructions like L32R, CALL,
-                 * and J already have correct offsets encoded. We DON'T need to modify them.
+                 * For split allocation, the VMA layout is NOT preserved between regions.
+                 * However, within each region the layout IS preserved. Since L32R/CALL/J
+                 * are PC-relative and the linker places literals in the same segment as
+                 * code, the relative offsets should still be correct.
                  *
-                 * The literal pool contents are already relocated by R_XTENSA_32 and
-                 * R_XTENSA_JMP_SLOT relocations. The L32R instruction just needs to
-                 * load from the correct literal pool entry, which it already does. */
-                ESP_LOGD(TAG, "SLOT0_OP: skipping (VMA layout preserved), offset=0x%x", offset);
+                 * If we see issues with L32R reaching literal pools across regions,
+                 * we may need to handle this more carefully. */
+                ESP_LOGD(TAG, "SLOT0_OP: skipping (VMA layout preserved within region), offset=0x%x", offset);
                 break;
             }
 

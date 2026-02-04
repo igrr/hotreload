@@ -24,6 +24,29 @@
  * - Not RISC-V with SOC_I_D_OFFSET (has I/D address split)
  */
 
+bool elf_mem_port_requires_split_alloc(void)
+{
+    /* Default: unified allocation is supported */
+    return false;
+}
+
+esp_err_t elf_mem_port_alloc_split(size_t text_size, size_t data_size,
+                                    uint32_t heap_caps,
+                                    void **text_base, void **data_base,
+                                    elf_port_mem_ctx_t *text_ctx,
+                                    elf_port_mem_ctx_t *data_ctx)
+{
+    /* Default port doesn't require split allocation */
+    (void)text_size;
+    (void)data_size;
+    (void)heap_caps;
+    (void)text_base;
+    (void)data_base;
+    (void)text_ctx;
+    (void)data_ctx;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
 bool elf_mem_port_prefer_spiram(void)
 {
     /* Default: don't prefer SPIRAM, use normal allocation */

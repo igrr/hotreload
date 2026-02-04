@@ -31,6 +31,40 @@ extern "C" {
 #endif
 
 /**
+ * @brief Check if this chip requires split text/data allocation
+ *
+ * Returns true for chips where executable memory cannot hold
+ * byte-addressable data. For example, ESP32's IRAM only supports
+ * 32-bit aligned access, so .rodata with strings must be in DRAM.
+ *
+ * @return true if split allocation is required, false otherwise
+ */
+bool elf_mem_port_requires_split_alloc(void);
+
+/**
+ * @brief Allocate split text and data regions (chip-specific)
+ *
+ * Called by elf_port_alloc_split() when split allocation is required.
+ *
+ * @param text_size  Size needed for executable sections
+ * @param data_size  Size needed for data sections
+ * @param heap_caps  User-specified heap caps (0 = auto-select)
+ * @param[out] text_base  Allocated text region base address
+ * @param[out] data_base  Allocated data region base address
+ * @param[out] text_ctx   Memory context for text region
+ * @param[out] data_ctx   Memory context for data region
+ * @return
+ *      - ESP_OK: Success
+ *      - ESP_ERR_NO_MEM: Allocation failed
+ *      - ESP_ERR_NOT_SUPPORTED: Split allocation not supported
+ */
+esp_err_t elf_mem_port_alloc_split(size_t text_size, size_t data_size,
+                                    uint32_t heap_caps,
+                                    void **text_base, void **data_base,
+                                    elf_port_mem_ctx_t *text_ctx,
+                                    elf_port_mem_ctx_t *data_ctx);
+
+/**
  * @brief Check if SPIRAM should be preferred for code loading
  *
  * On chips with MEMPROT (W^X enforcement), internal RAM cannot be used

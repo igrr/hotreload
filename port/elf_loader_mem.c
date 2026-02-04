@@ -19,22 +19,6 @@
 #include "elf_loader_port.h"
 #include "elf_loader_mem_port.h"
 
-/*
- * ESP32 (original) is not supported for dynamic code loading.
- *
- * The ESP32 memory architecture has fundamental limitations:
- * - IRAM (0x4008xxxx): Only supports 32-bit aligned access, no byte operations
- * - D/IRAM (0x3FFExxxx): Has inverted address mapping making sequential
- *   code execution impossible
- * - DRAM (0x3FFBxxxx): Byte-addressable but not executable
- *
- * Future work: Split .text and .rodata/.data/.bss allocations to enable
- * ESP32 support.
- */
-#if CONFIG_IDF_TARGET_ESP32
-#error "ESP32 is not supported for dynamic code loading. See comment above."
-#endif
-
 static const char *TAG = "elf_port_mem";
 
 esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
@@ -83,12 +67,12 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
         }
 
         if (ram == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate %zu bytes for ELF", size);
+            ESP_LOGE(TAG, "Failed to allocate %u bytes for ELF", (unsigned)size);
             return ESP_ERR_NO_MEM;
         }
     }
 
-    ESP_LOGI(TAG, "Allocated %zu bytes at %p for ELF loading", size, ram);
+    ESP_LOGD(TAG, "Allocated %u bytes at %p for ELF loading", (unsigned)size, ram);
 
     /* Let port layer set up any execution mapping (MMU, offsets, etc.) */
     esp_err_t err = elf_mem_port_init_exec_mapping(ram, size, ctx);
@@ -116,6 +100,67 @@ void elf_port_free(void *base, elf_port_mem_ctx_t *ctx)
 
     if (ctx != NULL) {
         memset(ctx, 0, sizeof(*ctx));
+    }
+}
+
+bool elf_port_requires_split_alloc(void)
+{
+    return elf_mem_port_requires_split_alloc();
+}
+
+esp_err_t elf_port_alloc_split(size_t text_size, size_t data_size,
+                                uint32_t heap_caps,
+                                void **text_base, void **data_base,
+                                elf_port_mem_ctx_t *text_ctx,
+                                elf_port_mem_ctx_t *data_ctx)
+{
+    if (text_base == NULL || data_base == NULL ||
+        text_ctx == NULL || data_ctx == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    memset(text_ctx, 0, sizeof(*text_ctx));
+    memset(data_ctx, 0, sizeof(*data_ctx));
+    *text_base = NULL;
+    *data_base = NULL;
+
+    /* Delegate to port layer for chip-specific split allocation */
+    esp_err_t err = elf_mem_port_alloc_split(text_size, data_size, heap_caps,
+                                              text_base, data_base,
+                                              text_ctx, data_ctx);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    ESP_LOGD(TAG, "Split allocation: text=%u bytes at %p, data=%u bytes at %p",
+             (unsigned)text_size, *text_base, (unsigned)data_size, *data_base);
+
+    return ESP_OK;
+}
+
+void elf_port_free_split(void *text_base, void *data_base,
+                         elf_port_mem_ctx_t *text_ctx,
+                         elf_port_mem_ctx_t *data_ctx)
+{
+    if (text_base != NULL) {
+        if (text_ctx != NULL) {
+            elf_mem_port_deinit_exec_mapping(text_ctx);
+        }
+        heap_caps_free(text_base);
+    }
+
+    if (data_base != NULL) {
+        if (data_ctx != NULL) {
+            elf_mem_port_deinit_exec_mapping(data_ctx);
+        }
+        heap_caps_free(data_base);
+    }
+
+    if (text_ctx != NULL) {
+        memset(text_ctx, 0, sizeof(*text_ctx));
+    }
+    if (data_ctx != NULL) {
+        memset(data_ctx, 0, sizeof(*data_ctx));
     }
 }
 

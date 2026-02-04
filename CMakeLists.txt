@@ -22,7 +22,10 @@ endif()
 
 # Add chip-specific memory port implementation
 # Selection order matters - more specific checks first
-if(CONFIG_IDF_TARGET_ESP32S2)
+if(CONFIG_IDF_TARGET_ESP32)
+    # ESP32: Split text/data allocation (IRAM is 32-bit only, DRAM is byte-addressable)
+    list(APPEND srcs "port/elf_loader_mem_port_esp32.c")
+elseif(CONFIG_IDF_TARGET_ESP32S2)
     # ESP32-S2: MMU-based PSRAM code execution
     list(APPEND srcs "port/elf_loader_mem_port_esp32s2.c")
 elseif(CONFIG_IDF_TARGET_ESP32S3)

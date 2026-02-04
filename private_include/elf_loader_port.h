@@ -36,14 +36,35 @@ extern "C" {
  * Fields used depend on chip architecture and memory configuration:
  * - mmu_off, mmu_num: MMU entry tracking for chips requiring dynamic mapping
  * - text_off: Offset from data address to instruction address (PSRAM or I/D split)
+ * - split_* fields: For split text/data allocation (ESP32)
  */
 typedef struct {
     int mmu_off;        /**< ESP32-S2: MMU entry offset (first entry index) */
     int mmu_num;        /**< ESP32-S2: Number of MMU entries allocated */
     uintptr_t text_off; /**< Offset from data addr to instruction addr (PSRAM) */
+
+    /* Split allocation support (ESP32) - these are set by the core loader
+     * before calling relocation handlers */
+    bool split_alloc;          /**< True if using split text/data allocation */
+    uintptr_t text_load_base;  /**< text_base - text_vma_lo */
+    uintptr_t text_vma_lo;     /**< Lowest VMA of text region */
+    uintptr_t text_vma_hi;     /**< Highest VMA of text region */
+    uintptr_t data_load_base;  /**< data_base - data_vma_lo */
+    uintptr_t data_vma_lo;     /**< Lowest VMA of data region */
+    uintptr_t data_vma_hi;     /**< Highest VMA of data region */
 } elf_port_mem_ctx_t;
 
 /* ========== Memory Functions (port/elf_loader_mem.c) ========== */
+
+/**
+ * @brief Check if this chip requires split text/data allocation
+ *
+ * Returns true for chips where executable memory cannot hold
+ * byte-addressable data (e.g., ESP32 IRAM is word-aligned only).
+ *
+ * @return true if split allocation is required, false otherwise
+ */
+bool elf_port_requires_split_alloc(void);
 
 /**
  * @brief Allocate memory suitable for code execution
@@ -78,6 +99,44 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
  * @param ctx  Memory context (may be modified to clear state)
  */
 void elf_port_free(void *base, elf_port_mem_ctx_t *ctx);
+
+/**
+ * @brief Allocate split text and data regions
+ *
+ * Used on chips where executable memory cannot hold byte-addressable data
+ * (e.g., ESP32 where IRAM only supports 32-bit aligned access).
+ *
+ * @param text_size  Size needed for executable sections (.text, .plt)
+ * @param data_size  Size needed for data sections (.data, .bss, .rodata, .got)
+ * @param heap_caps  User-specified heap caps (0 = auto-select)
+ * @param[out] text_base  Allocated text region base address
+ * @param[out] data_base  Allocated data region base address
+ * @param[out] text_ctx   Memory context for text region
+ * @param[out] data_ctx   Memory context for data region
+ * @return
+ *      - ESP_OK: Success
+ *      - ESP_ERR_NO_MEM: Allocation failed
+ *      - ESP_ERR_NOT_SUPPORTED: Split allocation not supported on this chip
+ */
+esp_err_t elf_port_alloc_split(size_t text_size, size_t data_size,
+                                uint32_t heap_caps,
+                                void **text_base, void **data_base,
+                                elf_port_mem_ctx_t *text_ctx,
+                                elf_port_mem_ctx_t *data_ctx);
+
+/**
+ * @brief Free split allocations
+ *
+ * Frees both text and data regions allocated by elf_port_alloc_split().
+ *
+ * @param text_base  Text region base address
+ * @param data_base  Data region base address
+ * @param text_ctx   Text region memory context
+ * @param data_ctx   Data region memory context
+ */
+void elf_port_free_split(void *text_base, void *data_base,
+                         elf_port_mem_ctx_t *text_ctx,
+                         elf_port_mem_ctx_t *data_ctx);
 
 /**
  * @brief Convert data bus address to instruction bus address
