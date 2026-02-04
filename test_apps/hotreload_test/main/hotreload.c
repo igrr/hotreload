@@ -69,7 +69,6 @@ TEST_CASE("hotreload_integration", "[integration]")
     hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
     ret = hotreload_server_start(&server_config);
     TEST_ASSERT_EQUAL(ESP_OK, ret);
-    ESP_LOGI(TAG, "Hotreload server started on port 8080");
     ESP_LOGI(TAG, "Ready for hot reload updates (cooperative reload enabled)");
 
     // Main loop demonstrating cooperative reload pattern
