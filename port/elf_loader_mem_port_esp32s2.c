@@ -109,7 +109,7 @@ static esp_err_t IRAM_ATTR init_mmu(elf_port_mem_ctx_t *ctx, void *ram_base, siz
     ctx->mmu_num = ibus_secs;
     ctx->text_off = ICACHE_ADDR(off) - PSRAM_ALIGN(ram_base);
 
-    ESP_LOGI(TAG, "MMU: mapped %lu entries at offset %d, text_off=0x%lx",
+    ESP_LOGD(TAG, "MMU: mapped %lu entries at offset %d, text_off=0x%lx",
              (unsigned long)ibus_secs, off, (unsigned long)ctx->text_off);
 
     return ESP_OK;

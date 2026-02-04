@@ -66,7 +66,7 @@ static const char *TAG = "elf_reloc_riscv";
  */
 static void patch_plt_for_iram(elf_parser_handle_t parser, void *ram_base, uintptr_t load_base)
 {
-    ESP_LOGI(TAG, "Looking for .plt section to patch...");
+    ESP_LOGD(TAG, "Looking for .plt section to patch...");
 
     /* Find .plt section */
     elf_iterator_handle_t it;
@@ -139,7 +139,7 @@ static void patch_plt_for_iram(elf_parser_handle_t parser, void *ram_base, uintp
             }
         }
 
-        ESP_LOGI(TAG, "Patched PLT for IRAM/DRAM offset (SOC_I_D_OFFSET=0x%x)", SOC_I_D_OFFSET);
+        ESP_LOGD(TAG, "Patched PLT for IRAM/DRAM offset (SOC_I_D_OFFSET=0x%x)", SOC_I_D_OFFSET);
         return;  /* Only one .plt section */
     }
 
@@ -394,7 +394,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
         }
     }
 
-    ESP_LOGI(TAG, "Processed %d relocations, applied %d", reloc_count, applied_count);
+    ESP_LOGD(TAG, "Processed %d relocations, applied %d", reloc_count, applied_count);
 
     return ESP_OK;
 }

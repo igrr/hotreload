@@ -547,10 +547,10 @@ esp_err_t elf_loader_load_sections(elf_loader_ctx_t *ctx)
     }
 
     if (ctx->split_alloc) {
-        ESP_LOGI(TAG, "Loaded %d sections: text at %p, data at %p",
+        ESP_LOGD(TAG, "Loaded %d sections: text at %p, data at %p",
                  items_loaded, ctx->text_base, ctx->data_base);
     } else {
-        ESP_LOGI(TAG, "Loaded %d segments into RAM at %p", items_loaded, ctx->ram_base);
+        ESP_LOGD(TAG, "Loaded %d segments into RAM at %p", items_loaded, ctx->ram_base);
     }
 
     return ESP_OK;
