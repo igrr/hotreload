@@ -33,7 +33,7 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
 
     /* If custom heap_caps specified, use those directly */
     if (heap_caps != 0) {
-        ESP_LOGI(TAG, "Allocating with custom heap_caps: 0x%lx", (unsigned long)heap_caps);
+        ESP_LOGD(TAG, "Allocating with custom heap_caps: 0x%lx", (unsigned long)heap_caps);
         ram = heap_caps_aligned_alloc(4, size, heap_caps);
         if (ram == NULL) {
             ESP_LOGE(TAG, "Failed to allocate %zu bytes with caps 0x%lx",
@@ -46,7 +46,7 @@ esp_err_t elf_port_alloc(size_t size, uint32_t heap_caps,
         /* Check if port layer prefers SPIRAM (e.g., for MEMPROT chips).
          * On ESP chips with SPIRAM support, check SPIRAM availability at run time. */
         if (elf_mem_port_prefer_spiram()) {
-            ESP_LOGI(TAG, "Port prefers SPIRAM for code loading");
+            ESP_LOGD(TAG, "Port prefers SPIRAM for code loading");
             ram = heap_caps_aligned_alloc(4, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         }
 

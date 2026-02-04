@@ -306,7 +306,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
         }
     }
 
-    ESP_LOGI(TAG, "Processed %d relocations, applied %d", reloc_count, applied_count);
+    ESP_LOGD(TAG, "Processed %d relocations, applied %d", reloc_count, applied_count);
 
     return ESP_OK;
 }
