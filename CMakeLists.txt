@@ -47,6 +47,7 @@ idf_component_register(
         "private_include"
     PRIV_REQUIRES
         esp_mm
+        esp_netif
         esp_partition
         esp_http_server
 )

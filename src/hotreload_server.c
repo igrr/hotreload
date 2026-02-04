@@ -13,6 +13,7 @@
 #include "hotreload.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 
 static const char *TAG = "hotreload_server";
 
@@ -172,7 +173,19 @@ esp_err_t hotreload_server_start(const hotreload_server_config_t *config)
     httpd_register_uri_handler(s_server, &pending_uri);
     httpd_register_uri_handler(s_server, &status_uri);
 
-    ESP_LOGI(TAG, "Hotreload server started on port %d", s_config.port);
+    // Get and display the server URL with IP address
+    esp_netif_t *netif = esp_netif_get_default_netif();
+    if (netif != NULL) {
+        esp_netif_ip_info_t ip_info;
+        if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+            ESP_LOGI(TAG, "Hotreload server started at http://" IPSTR ":%d",
+                     IP2STR(&ip_info.ip), s_config.port);
+        } else {
+            ESP_LOGI(TAG, "Hotreload server started on port %d", s_config.port);
+        }
+    } else {
+        ESP_LOGI(TAG, "Hotreload server started on port %d", s_config.port);
+    }
     ESP_LOGI(TAG, "  POST /upload  - Upload ELF to flash (reload triggered by app)");
     ESP_LOGI(TAG, "  GET  /pending - Check if update is pending");
     ESP_LOGI(TAG, "  GET  /status  - Server status");

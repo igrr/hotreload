@@ -216,7 +216,7 @@ def test_hotreload_unit_tests(dut):
     ["-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:8080-:8080"],
     indirect=True,
 )
-def test_hot_reload_e2e(dut, original_code):
+def test_hot_reload_e2e(dut, app, original_code):
     """
     End-to-end test for hot reload functionality in QEMU.
 
@@ -230,6 +230,10 @@ def test_hot_reload_e2e(dut, original_code):
     7. Verify reload succeeded without crashes
     """
     print("\n=== Starting Hot Reload E2E Test ===\n")
+
+    # Get build directory from app fixture (supports CMake presets)
+    build_dir = Path(app.binary_path)
+    print(f"  Using build directory: {build_dir}")
 
     # Step 0: Wait for Unity menu and select the integration test
     print("Step 0: Selecting integration test from Unity menu...")
@@ -245,7 +249,7 @@ def test_hot_reload_e2e(dut, original_code):
 
     # Step 2: Wait for server to start
     print("Step 2: Waiting for HTTP server to start...")
-    dut.expect("Hotreload server started on port 8080", timeout=30)
+    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=30)
     print("  Server started!")
 
     # Give the network stack a moment to be fully ready
@@ -269,12 +273,12 @@ def test_hot_reload_e2e(dut, original_code):
 
     # Step 5: Rebuild
     print("Step 5: Rebuilding reloadable component...")
-    rebuild_reloadable()
+    rebuild_reloadable(build_dir)
     print("  Build successful!")
 
     # Step 6: Upload ELF (app will reload via cooperative polling)
     print("Step 6: Uploading new ELF...")
-    response = upload_elf(SERVER_PORT)
+    response = upload_elf(SERVER_PORT, build_dir)
     print(f"  Server response: {response.status_code} - {response.text.strip()}")
     assert response.status_code == 200, f"Upload failed: {response.text}"
 
@@ -301,7 +305,7 @@ def test_hot_reload_e2e(dut, original_code):
     ["-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:8080-:8080"],
     indirect=True,
 )
-def test_idf_reload_command(dut, original_code):
+def test_idf_reload_command(dut, app, original_code):
     """
     Test the idf.py reload command end-to-end in QEMU.
 
@@ -319,6 +323,10 @@ def test_idf_reload_command(dut, original_code):
     """
     print("\n=== Testing idf.py reload Command ===\n")
 
+    # Get build directory from app fixture (supports CMake presets)
+    build_dir = Path(app.binary_path)
+    print(f"  Using build directory: {build_dir}")
+
     # Step 0: Wait for Unity menu and select the integration test
     print("Step 0: Selecting integration test from Unity menu...")
     dut.expect_exact("Press ENTER to see the list of tests.", timeout=60)
@@ -332,7 +340,7 @@ def test_idf_reload_command(dut, original_code):
 
     # Step 2: Wait for server to start
     print("Step 2: Waiting for HTTP server to start...")
-    dut.expect("Hotreload server started on port 8080", timeout=30)
+    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=30)
     print("  Server started!")
 
     # Give the network stack a moment to be fully ready
@@ -356,7 +364,7 @@ def test_idf_reload_command(dut, original_code):
 
     # Step 5: Run idf.py reload command
     print("Step 5: Running 'idf.py reload --url http://127.0.0.1:8080'...")
-    result = run_idf_reload(f"http://127.0.0.1:{SERVER_PORT}")
+    result = run_idf_reload(f"http://127.0.0.1:{SERVER_PORT}", build_dir)
 
     print(f"  Return code: {result.returncode}")
     if result.stdout:
@@ -513,7 +521,7 @@ def test_idf_watch_with_qemu(target, original_code):
             "Should see initial greeting"
         print("  Initial load confirmed!")
 
-        assert capture.wait_for_stdout(r"Hotreload server started on port 8080", timeout=30), \
+        assert capture.wait_for_stdout(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=30), \
             "Server should start"
         print("  Server started!")
 
@@ -659,7 +667,7 @@ def test_hot_reload_e2e_hardware(dut, app, original_code):
 
     # Step 3: Wait for server to start (starts after initial load)
     print("Step 3: Waiting for HTTP server to start...")
-    dut.expect("Hotreload server started on port 8080", timeout=60)
+    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=60)
     print("  Server started!")
 
     device_url = f"http://{device_ip}:8080"
@@ -754,7 +762,7 @@ def test_idf_reload_command_hardware(dut, app, original_code):
 
     # Step 3: Wait for server to start (starts after initial load)
     print("Step 3: Waiting for HTTP server to start...")
-    dut.expect("Hotreload server started on port 8080", timeout=60)
+    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=60)
     print("  Server started!")
 
     # Give the network stack a moment
