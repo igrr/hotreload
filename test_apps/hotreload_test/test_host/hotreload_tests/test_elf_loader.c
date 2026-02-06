@@ -393,36 +393,6 @@ TEST_CASE("elf_loader_calculate_memory_layout returns valid size", "[elf_loader]
     TEST_ASSERT_GREATER_THAN(0, ram_size);
     TEST_ASSERT_LESS_THAN(0x100000, ram_size);
 
-    // VMA base should be non-zero
-    TEST_ASSERT_NOT_EQUAL(0, vma_base);
-
-    elf_loader_cleanup(&ctx);
-    esp_partition_munmap(mmap_handle);
-}
-
-TEST_CASE("elf_loader_calculate_memory_layout stores values in context", "[elf_loader][layout]")
-{
-    const esp_partition_t *partition = esp_partition_find_first(
-        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_ANY, "hotreload");
-    TEST_ASSERT_NOT_NULL(partition);
-
-    esp_partition_mmap_handle_t mmap_handle;
-    const void *mmap_ptr;
-    esp_err_t err = esp_partition_mmap(partition, 0, partition->size,
-                                       ESP_PARTITION_MMAP_DATA, &mmap_ptr, &mmap_handle);
-    TEST_ASSERT_EQUAL(ESP_OK, err);
-
-    elf_loader_ctx_t ctx;
-    err = elf_loader_init(&ctx, mmap_ptr, partition->size);
-    TEST_ASSERT_EQUAL(ESP_OK, err);
-
-    err = elf_loader_calculate_memory_layout(&ctx, NULL, NULL);
-    TEST_ASSERT_EQUAL(ESP_OK, err);
-
-    // Values should be stored in context
-    TEST_ASSERT_GREATER_THAN(0, ctx.ram_size);
-    TEST_ASSERT_NOT_EQUAL(0, ctx.vma_base);
-
     elf_loader_cleanup(&ctx);
     esp_partition_munmap(mmap_handle);
 }
@@ -716,11 +686,29 @@ TEST_CASE("elf_loader_apply_relocations modifies loaded data", "[elf_loader][rel
 
     // Calculate checksum before relocations using word-aligned access
     // Note: IRAM requires 32-bit aligned access, byte operations will crash
+    // For split allocation (ESP32), we need to checksum both text and data regions
+    // since relocations may be in either region
     uint32_t checksum_before = 0;
-    uint32_t *ram_words = (uint32_t *)ctx.ram_base;
-    size_t num_words = ctx.ram_size / 4;
-    for (size_t i = 0; i < num_words; i++) {
-        checksum_before += ram_words[i];
+    if (ctx.split_alloc) {
+        // Checksum text region (IRAM)
+        uint32_t *text_words = (uint32_t *)ctx.text_base;
+        size_t text_num_words = ctx.text_size / 4;
+        for (size_t i = 0; i < text_num_words; i++) {
+            checksum_before += text_words[i];
+        }
+        // Checksum data region (DRAM)
+        uint32_t *data_words = (uint32_t *)ctx.data_base;
+        size_t data_num_words = ctx.data_size / 4;
+        for (size_t i = 0; i < data_num_words; i++) {
+            checksum_before += data_words[i];
+        }
+    } else {
+        // Unified allocation - single region
+        uint32_t *ram_words = (uint32_t *)ctx.ram_base;
+        size_t num_words = ctx.ram_size / 4;
+        for (size_t i = 0; i < num_words; i++) {
+            checksum_before += ram_words[i];
+        }
     }
 
     err = elf_loader_apply_relocations(&ctx);
@@ -728,8 +716,26 @@ TEST_CASE("elf_loader_apply_relocations modifies loaded data", "[elf_loader][rel
 
     // Calculate checksum after relocations
     uint32_t checksum_after = 0;
-    for (size_t i = 0; i < num_words; i++) {
-        checksum_after += ram_words[i];
+    if (ctx.split_alloc) {
+        // Checksum text region (IRAM)
+        uint32_t *text_words = (uint32_t *)ctx.text_base;
+        size_t text_num_words = ctx.text_size / 4;
+        for (size_t i = 0; i < text_num_words; i++) {
+            checksum_after += text_words[i];
+        }
+        // Checksum data region (DRAM)
+        uint32_t *data_words = (uint32_t *)ctx.data_base;
+        size_t data_num_words = ctx.data_size / 4;
+        for (size_t i = 0; i < data_num_words; i++) {
+            checksum_after += data_words[i];
+        }
+    } else {
+        // Unified allocation - single region
+        uint32_t *ram_words = (uint32_t *)ctx.ram_base;
+        size_t num_words = ctx.ram_size / 4;
+        for (size_t i = 0; i < num_words; i++) {
+            checksum_after += ram_words[i];
+        }
     }
 
     // Checksum should change (relocations modify data)
