@@ -1,6 +1,9 @@
 # ESP32-C3 specific configuration
 # This file is applied when building for ESP32-C3 target
 
+# Use USB Serial/JTAG for console (required for boards without UART bridge)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
 # Disable memory protection to allow loading executable code at runtime
 # Hot reload requires executing code from dynamically allocated memory,
 # which conflicts with W^X (write XOR execute) enforcement
