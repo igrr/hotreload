@@ -181,44 +181,58 @@ def list_serial_ports() -> list[str]:
     return sorted(ports)
 
 
+def _detect_chip_worker(port: str, result_dict: dict) -> None:
+    """Worker function for chip detection (runs in a thread)."""
+    try:
+        from esptool.cmds import detect_chip
+        with detect_chip(port, connect_attempts=2) as esp:
+            result_dict["chip"] = esp.CHIP_NAME.lower().replace("-", "")
+    except Exception:
+        pass
+
+
 def detect_chip_type(port: str) -> str | None:
     """Detect the ESP chip type on a given serial port using esptool API.
 
     Returns the chip type as a lowercase string (e.g., 'esp32c3') or None if
-    detection fails.
+    detection fails. Times out after CHIP_DETECT_TIMEOUT seconds.
     """
-    try:
-        from esptool.cmds import detect_chip
-    except ImportError:
-        # esptool not available as module, this shouldn't happen in ESP-IDF env
+    import threading
+
+    result: dict = {}
+    thread = threading.Thread(target=_detect_chip_worker, args=(port, result), daemon=True)
+    thread.start()
+    thread.join(timeout=CHIP_DETECT_TIMEOUT)
+
+    if thread.is_alive():
         return None
 
-    try:
-        with detect_chip(port, connect_attempts=2) as esp:
-            # Use CHIP_NAME attribute which gives the canonical name (e.g., "ESP32-C3")
-            # This is more reliable than get_chip_description() which may include
-            # variant info like "ESP32-D0WD"
-            chip_name = esp.CHIP_NAME.lower().replace("-", "")
-            return chip_name
-    except Exception:
-        return None
+    return result.get("chip")
 
 
 def detect_all_devices() -> list[DeviceInfo]:
-    """Detect all connected ESP devices."""
-    devices = []
+    """Detect all connected ESP devices in parallel."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     ports = list_serial_ports()
+    if not ports:
+        return []
 
-    for port in ports:
-        print(f"  Checking {port}...", end=" ", flush=True)
-        chip = detect_chip_type(port)
-        if chip:
-            print(f"{chip}")
-            devices.append(DeviceInfo(port=port, chip_type=chip))
-        else:
-            print("not an ESP or busy")
+    devices = []
+    print(f"  Checking {len(ports)} port(s) in parallel (timeout: {CHIP_DETECT_TIMEOUT}s)...")
 
-    return devices
+    with ThreadPoolExecutor(max_workers=len(ports)) as executor:
+        futures = {executor.submit(detect_chip_type, port): port for port in ports}
+        for future in as_completed(futures):
+            port = futures[future]
+            chip = future.result()
+            if chip:
+                print(f"  {port}: {chip}")
+                devices.append(DeviceInfo(port=port, chip_type=chip))
+            else:
+                print(f"  {port}: not an ESP or busy")
+
+    return sorted(devices, key=lambda d: d.port)
 
 
 def get_preset_for_target(target: str, mode: str, presets: list[dict]) -> str | None:
@@ -314,13 +328,18 @@ def run_hardware_tests(
     if test_filter:
         test_name += f"[{test_filter}]"
 
+    # Restrict to hardware tests only to avoid collecting QEMU parametrizations
+    effective_filter = "hardware"
+    if test_filter:
+        effective_filter = f"({test_filter}) and hardware"
+
     result = run_pytest(
         test_name=test_name,
         target=device.chip_type,
         build_dir=build_dir,
         embedded_services="esp,idf",
         port=device.port,
-        test_filter=test_filter,
+        test_filter=effective_filter,
     )
 
     return [result]
@@ -355,15 +374,15 @@ def run_qemu_tests(
         test_name += f"[{test_filter}]"
 
     # Build the filter expression
-    # If no filter provided, skip network-dependent tests on non-network targets
-    effective_filter = test_filter
+    # Exclude hardware-only tests to avoid collecting cross-environment parametrizations
+    effective_filter = "not hardware"
+    if test_filter:
+        effective_filter = f"({test_filter}) and not hardware"
+
+    # Skip network-dependent tests on non-network targets
     if target not in QEMU_NETWORK_TARGETS:
-        # Exclude tests that require networking (e2e, reload_command, watch)
         network_exclusion = "not (e2e or reload_command or watch)"
-        if effective_filter:
-            effective_filter = f"({effective_filter}) and {network_exclusion}"
-        else:
-            effective_filter = network_exclusion
+        effective_filter = f"({effective_filter}) and {network_exclusion}"
 
     result = run_pytest(
         test_name=test_name,
