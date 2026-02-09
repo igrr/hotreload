@@ -363,7 +363,7 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
         if not skip_build:
             print("Building project...")
             result = subprocess.run(
-                ["idf.py", "build"],
+                ["idf.py", "-B", str(build_dir), "build"],
                 cwd=project,
                 capture_output=not verbose,
             )
@@ -503,7 +503,7 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
                     # Build
                     print("Building...")
                     result = subprocess.run(
-                        ["idf.py", "build"],
+                        ["idf.py", "-B", str(build_dir), "build"],
                         cwd=project,
                         capture_output=True,
                     )
