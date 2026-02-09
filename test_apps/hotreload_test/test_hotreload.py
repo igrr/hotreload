@@ -182,12 +182,24 @@ def check_server_status(port: int) -> bool:
 
 
 @pytest.fixture
-def original_code():
-    """Pytest fixture to restore original code after test."""
+def original_code(request):
+    """Pytest fixture to restore original code and rebuild after test.
+
+    This ensures test isolation: the source file AND the build artifacts
+    are restored, so subsequent tests get a clean flash image.
+    """
     original = RELOADABLE_SRC.read_text()
     yield original
     # Restore original code after test
     RELOADABLE_SRC.write_text(original)
+    # Rebuild so the flash image matches the restored source.
+    # Without this, subsequent tests would flash a stale image containing
+    # the modified code from this test (see issue #58).
+    try:
+        app = request.getfixturevalue("app")
+        rebuild_reloadable(Path(app.binary_path))
+    except pytest.FixtureLookupError:
+        pass
 
 
 @pytest.mark.host_test
