@@ -53,6 +53,9 @@ def get_supported_targets() -> list[str]:
 # QEMU targets - this list changes rarely as QEMU support is limited
 QEMU_TARGETS = ["esp32", "esp32c3", "esp32s3"]
 
+# Targets with QEMU networking support (OpenETH)
+QEMU_NETWORK_TARGETS = ["esp32", "esp32c3", "esp32s3"]
+
 # Hardware targets - read from component manifest
 SUPPORTED_TARGETS = get_supported_targets()
 RELOADABLE_SRC = PROJECT_DIR / "components" / "reloadable" / "reloadable.c"
@@ -221,7 +224,7 @@ def test_hotreload_unit_tests(dut):
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
+@pytest.mark.parametrize("target", QEMU_NETWORK_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
@@ -310,7 +313,7 @@ def test_hot_reload_e2e(dut, app, original_code):
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
+@pytest.mark.parametrize("target", QEMU_NETWORK_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
@@ -466,7 +469,7 @@ class OutputCapture:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32c3"], indirect=True)  # esp32c3 supports both hotreload and QEMU networking
+@pytest.mark.parametrize("target", QEMU_NETWORK_TARGETS, indirect=True)
 def test_idf_watch_with_qemu(target, original_code):
     """
     Test the idf.py watch command combined with QEMU.

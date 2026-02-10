@@ -48,7 +48,7 @@ IDF_COMPONENT_FILE = PROJECT_ROOT / "idf_component.yml"
 QEMU_TARGETS = ["esp32", "esp32c3", "esp32s3"]
 
 # Targets with QEMU networking support (required for E2E tests)
-QEMU_NETWORK_TARGETS = ["esp32"]
+QEMU_NETWORK_TARGETS = ["esp32", "esp32c3", "esp32s3"]
 
 
 @dataclass
