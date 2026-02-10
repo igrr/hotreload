@@ -23,6 +23,7 @@ Run unit tests (hardware):
 Supported targets are defined in idf_component.yml at the project root.
 """
 
+import os
 import subprocess
 import threading
 import time
@@ -201,8 +202,13 @@ def original_code(request):
     try:
         app = request.getfixturevalue("app")
         rebuild_reloadable(Path(app.binary_path))
-    except pytest.FixtureLookupError:
-        pass
+    except Exception:
+        # app fixture may not be available (e.g. test_idf_watch_with_qemu
+        # manages QEMU as a subprocess instead of via pytest-embedded).
+        # Fall back to --build-dir from the command line.
+        build_dir = request.config.getoption("build_dir", None)
+        if build_dir:
+            rebuild_reloadable(Path(build_dir))
 
 
 @pytest.mark.host_test
@@ -492,6 +498,11 @@ def test_idf_watch_with_qemu(target, original_code):
     # Step 1: Start idf.py watch qemu with network forwarding
     # Use -B to specify build directory, which is required for loading component extensions
     build_dir = f"build/{target}-qemu"
+    qemu_extra = f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:8080"
+    # ESP32-S3 needs explicit PSRAM size to match what conftest provides
+    # for pytest-embedded tests (default 32M causes crashes in QEMU)
+    if target == "esp32s3":
+        qemu_extra += " -m 4M"
     print(f"Step 1: Starting 'idf.py -B {build_dir} watch --url http://127.0.0.1:{test_port} qemu'...")
     process = subprocess.Popen(
         [
@@ -499,7 +510,7 @@ def test_idf_watch_with_qemu(target, original_code):
             "watch",
             "--url", f"http://127.0.0.1:{test_port}",
             "qemu",
-            "--qemu-extra-args", f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:8080",
+            "--qemu-extra-args", qemu_extra,
         ],
         cwd=PROJECT_DIR,
         stdin=subprocess.PIPE,
@@ -507,6 +518,7 @@ def test_idf_watch_with_qemu(target, original_code):
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,  # Line buffered
+        start_new_session=True,  # Own process group so we can kill QEMU child too
     )
 
     capture = OutputCapture(process)
@@ -588,14 +600,23 @@ def test_idf_watch_with_qemu(target, original_code):
         print("\n=== idf.py watch + qemu Test PASSED ===\n")
 
     finally:
-        # Clean shutdown
+        # Clean shutdown — kill the entire process group to ensure the
+        # QEMU child process is also terminated (idf.py runs QEMU via
+        # subprocess.run in foreground mode, which becomes orphaned if
+        # we only terminate the idf.py parent).
         print("Cleaning up...")
         capture.stop()
-        process.terminate()
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
             process.wait()
         print("  Process terminated.")
 
