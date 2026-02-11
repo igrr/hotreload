@@ -26,21 +26,22 @@ dependencies:
 
 ## Quick Start
 
-### 1. Add a Partition for Reloadable Code
+Suppose you have an application which looks like this:
 
-Add to your `partitions.csv`:
-
-```csv
-# Name,     Type, SubType, Offset,  Size,   Flags
-nvs,        data, nvs,     0x9000,  0x6000,
-phy_init,   data, phy,     0xf000,  0x1000,
-factory,    app,  factory, 0x10000, 1M,
-hotreload,  app,  0x40,    ,        512k,
+```c
+void app_main(void) {
+    init();
+    while (true) {
+        do_work();
+    }
+}
 ```
 
-### 2. Create a Reloadable Component
+and you want to iterate on `do_work`. This component allows you to do so, without reflashing and restarting the entire application!
 
-Create a component with your reloadable code:
+### 1. Move the Function into a Reloadable Component
+
+If the code you want to reload is not yet in a separate component, create one and move the code there:
 
 ```
 components/reloadable/
@@ -54,8 +55,7 @@ components/reloadable/
 ```c
 #pragma once
 
-int reloadable_add(int a, int b);
-void reloadable_greet(const char *name);
+void do_work(void);
 ```
 
 **reloadable.c**:
@@ -63,16 +63,12 @@ void reloadable_greet(const char *name);
 #include <stdio.h>
 #include "reloadable.h"
 
-int reloadable_add(int a, int b) {
-    return a + b;
-}
-
-void reloadable_greet(const char *name) {
-    printf("Hello, %s!\n", name);
+void do_work(void) {
+    printf("Hello from reloadable code!\n");
 }
 ```
 
-**CMakeLists.txt**:
+Add `RELOADABLE` option to `idf_component_register` call in your **CMakeLists.txt**:
 ```cmake
 idf_component_register(
     RELOADABLE
@@ -82,35 +78,59 @@ idf_component_register(
 )
 ```
 
-**Alternative: Using Kconfig**
-
-You can also make components reloadable via sdkconfig without modifying their CMakeLists.txt:
+You can also make an existing component reloadable via sdkconfig without modifying its CMakeLists.txt:
 
 ```
-CONFIG_HOTRELOAD_COMPONENTS="reloadable;my_other_module"
+CONFIG_HOTRELOAD_COMPONENTS="reloadable"
 ```
 
-### 3. Use in Your Application
+### 2. Update the Application Code
+
+Modify your main loop to load the reloadable code and check for updates:
 
 ```c
 #include "hotreload.h"
-#include "reloadable.h"      // Your reloadable API
+#include "reloadable.h"      // Your reloadable API (contains do_work)
 
 void app_main(void) {
+    init();
+
     // Load the reloadable ELF from flash
     hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
-    esp_err_t err = hotreload_load(&config);
-    if (err != ESP_OK) {
-        printf("Failed to load: %s\n", esp_err_to_name(err));
-        return;
+    ESP_ERROR_CHECK(hotreload_load(&config));
+
+    while (true) {
+        do_work();
+
+        // Check for updates at a safe point (no reloadable code on the stack)
+        if (hotreload_update_available()) {
+            printf("Update available, reloading...\n");
+            hotreload_reload(&config);
+        }
     }
-
-    // Call reloadable functions (goes through symbol table)
-    int result = reloadable_add(2, 3);
-    printf("2 + 3 = %d\n", result);
-
-    reloadable_greet("World");
 }
+```
+
+If you need to suspend or reinitialize something when the code is reloaded (e.g. background tasks that call reloadable functions), do so before and after the reload:
+
+```c
+        if (hotreload_update_available()) {
+            suspend_background_tasks();
+            hotreload_reload(&config);
+            resume_background_tasks();
+        }
+```
+
+### 3. Add a Partition for Reloadable Code
+
+Add `hotreload` partition to your `partitions.csv`:
+
+```csv
+# Name,     Type, SubType, Offset,  Size,   Flags
+nvs,        data, nvs,     0x9000,  0x6000,
+phy_init,   data, phy,     0xf000,  0x1000,
+factory,    app,  factory, 0x10000, 1M,
+hotreload,  app,  0x40,    ,        512k,
 ```
 
 ### 4. Build and Flash
