@@ -202,10 +202,10 @@ def original_code(request):
     try:
         app = request.getfixturevalue("app")
         rebuild_reloadable(Path(app.binary_path))
-    except Exception:
-        # app fixture may not be available (e.g. test_idf_watch_with_qemu
-        # manages QEMU as a subprocess instead of via pytest-embedded).
-        # Fall back to --build-dir from the command line.
+    except (pytest.FixtureLookupError, AssertionError):
+        # FixtureLookupError: "app" fixture not defined for this test.
+        # AssertionError: fixture value unavailable during teardown (already torn down).
+        # Either way, fall back to --build-dir from the command line.
         build_dir = request.config.getoption("build_dir", None)
         if build_dir:
             rebuild_reloadable(Path(build_dir))
