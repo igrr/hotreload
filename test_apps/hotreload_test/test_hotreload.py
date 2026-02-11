@@ -23,6 +23,7 @@ Run unit tests (hardware):
 Supported targets are defined in idf_component.yml at the project root.
 """
 
+import os
 import subprocess
 import threading
 import time
@@ -52,6 +53,9 @@ def get_supported_targets() -> list[str]:
 
 # QEMU targets - this list changes rarely as QEMU support is limited
 QEMU_TARGETS = ["esp32", "esp32c3", "esp32s3"]
+
+# Targets with QEMU networking support (OpenETH)
+QEMU_NETWORK_TARGETS = ["esp32", "esp32c3", "esp32s3"]
 
 # Hardware targets - read from component manifest
 SUPPORTED_TARGETS = get_supported_targets()
@@ -198,8 +202,13 @@ def original_code(request):
     try:
         app = request.getfixturevalue("app")
         rebuild_reloadable(Path(app.binary_path))
-    except pytest.FixtureLookupError:
-        pass
+    except (pytest.FixtureLookupError, AssertionError):
+        # FixtureLookupError: "app" fixture not defined for this test.
+        # AssertionError: fixture value unavailable during teardown (already torn down).
+        # Either way, fall back to --build-dir from the command line.
+        build_dir = request.config.getoption("build_dir", None)
+        if build_dir:
+            rebuild_reloadable(Path(build_dir))
 
 
 @pytest.mark.host_test
@@ -221,7 +230,7 @@ def test_hotreload_unit_tests(dut):
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
+@pytest.mark.parametrize("target", QEMU_NETWORK_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
@@ -310,7 +319,7 @@ def test_hot_reload_e2e(dut, app, original_code):
 
 @pytest.mark.host_test
 @pytest.mark.qemu
-@pytest.mark.parametrize("target", ["esp32"], indirect=True)  # QEMU network only available on ESP32
+@pytest.mark.parametrize("target", QEMU_NETWORK_TARGETS, indirect=True)
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
@@ -466,7 +475,7 @@ class OutputCapture:
 
 
 @pytest.mark.host_test
-@pytest.mark.parametrize("target", ["esp32c3"], indirect=True)  # esp32c3 supports both hotreload and QEMU networking
+@pytest.mark.parametrize("target", QEMU_NETWORK_TARGETS, indirect=True)
 def test_idf_watch_with_qemu(target, original_code):
     """
     Test the idf.py watch command combined with QEMU.
@@ -489,6 +498,11 @@ def test_idf_watch_with_qemu(target, original_code):
     # Step 1: Start idf.py watch qemu with network forwarding
     # Use -B to specify build directory, which is required for loading component extensions
     build_dir = f"build/{target}-qemu"
+    qemu_extra = f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:8080"
+    # ESP32-S3 needs explicit PSRAM size to match what conftest provides
+    # for pytest-embedded tests (default 32M causes crashes in QEMU)
+    if target == "esp32s3":
+        qemu_extra += " -m 4M"
     print(f"Step 1: Starting 'idf.py -B {build_dir} watch --url http://127.0.0.1:{test_port} qemu'...")
     process = subprocess.Popen(
         [
@@ -496,7 +510,7 @@ def test_idf_watch_with_qemu(target, original_code):
             "watch",
             "--url", f"http://127.0.0.1:{test_port}",
             "qemu",
-            "--qemu-extra-args", f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:8080",
+            "--qemu-extra-args", qemu_extra,
         ],
         cwd=PROJECT_DIR,
         stdin=subprocess.PIPE,
@@ -504,6 +518,7 @@ def test_idf_watch_with_qemu(target, original_code):
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,  # Line buffered
+        start_new_session=True,  # Own process group so we can kill QEMU child too
     )
 
     capture = OutputCapture(process)
@@ -585,14 +600,23 @@ def test_idf_watch_with_qemu(target, original_code):
         print("\n=== idf.py watch + qemu Test PASSED ===\n")
 
     finally:
-        # Clean shutdown
+        # Clean shutdown — kill the entire process group to ensure the
+        # QEMU child process is also terminated (idf.py runs QEMU via
+        # subprocess.run in foreground mode, which becomes orphaned if
+        # we only terminate the idf.py parent).
         print("Cleaning up...")
         capture.stop()
-        process.terminate()
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
             process.wait()
         print("  Process terminated.")
 
