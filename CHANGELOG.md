@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.9.0 (2026-02-11)
+
+### Feat
+
+- **tests**: enable QEMU network tests on ESP32-C3 and ESP32-S3
+- **hotreload_server**: print full URL with IP address at startup
+- **elf_loader**: add split text/data allocation for ESP32 support
+- **test**: add comprehensive test runner script
+- **test**: update ESP32-P4 config for PSRAM, UART, and Ethernet
+
+### Fix
+
+- **tests**: narrow exception handling in original_code fixture
+- **tests**: fix test_idf_watch_with_qemu reliability issues
+- **tests**: prevent cross-environment test collection in run_all_tests.py
+- **tests**: rebuild after restoring source to ensure test isolation
+- **config**: switch ESP32-C3 console to USB_SERIAL_JTAG for hardware
+- **idf_ext**: pass -B build_dir to nested idf.py build calls
+- **tests**: fix ESP32 and ESP32-S3 QEMU unit tests
+- **elf_loader**: use section-based classification for ESP32 split allocation
+- **test**: support optional sdkconfig.local for WiFi credentials
+- **config**: update ESP32-P4 for USB_SERIAL_JTAG console (rev 3.x)
+- **test**: support CMake presets in E2E hardware tests
+- **test**: address MR review comments
+- **test**: fix E2E test IP detection for hardware tests
+- **elf_loader**: add runtime SPIRAM detection for ESP32-S2/S3
+
+### Refactor
+
+- **elf_loader**: change debug-level log messages to ESP_LOGD
+- **api**: remove pre/post reload hooks
+
 ## v0.8.0 (2026-01-31)
 
 ### Feat
