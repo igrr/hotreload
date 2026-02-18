@@ -169,13 +169,10 @@ qemu:unit:esp32s3:
       junit: results/qemu-unit-esp32s3.xml
 
 # --- E2E integration tests (QEMU with networking) ---
-# E2E tests require QEMU networking (OpenETH) and HTTP server timing;
-# allow failures until CI networking is stabilized.
 
 qemu:e2e:esp32:
   extends: .qemu_test_template
   needs: ["build:esp32-qemu"]
-  allow_failure: true
   script:
     - cd test_apps/hotreload_test
     - >
@@ -195,7 +192,6 @@ qemu:e2e:esp32:
 qemu:e2e:esp32c3:
   extends: .qemu_test_template
   needs: ["build:esp32c3-qemu"]
-  allow_failure: true
   script:
     - cd test_apps/hotreload_test
     - >
@@ -215,7 +211,6 @@ qemu:e2e:esp32c3:
 qemu:e2e:esp32s3:
   extends: .qemu_test_template
   needs: ["build:esp32s3-qemu"]
-  allow_failure: true
   script:
     - cd test_apps/hotreload_test
     - >
