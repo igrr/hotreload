@@ -183,8 +183,8 @@ esp_err_t elf_port_sync_cache(void *base, size_t size)
     int flags = ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED;
     esp_err_t err = esp_cache_msync(base, size, flags);
 
-    if (err == ESP_ERR_NOT_SUPPORTED) {
-        /* esp_cache_msync not supported - use architecture-specific sync */
+    if (err == ESP_ERR_NOT_SUPPORTED || err == ESP_ERR_INVALID_ARG) {
+        /* esp_cache_msync not supported or address not cacheable (e.g. in QEMU) */
 #if CONFIG_IDF_TARGET_ARCH_XTENSA
         __asm__ volatile (
             "memw\n"

@@ -1,5 +1,261 @@
 stages:
+  - build
+  - test
   - deploy
+
+# ---------------------------------------------------------------------------
+# Global defaults
+# ---------------------------------------------------------------------------
+
+default:
+  image: espressif/idf:release-v6.0
+
+variables:
+  # Treat warnings as errors (see idf-extra-components CI)
+  PEDANTIC_FLAGS: "-DIDF_CI_BUILD -Werror -Werror=deprecated-declarations -Werror=unused-variable -Werror=unused-but-set-variable -Werror=unused-function"
+  EXTRA_CFLAGS: "${PEDANTIC_FLAGS} -Wstrict-prototypes"
+  EXTRA_CXXFLAGS: "${PEDANTIC_FLAGS}"
+
+# ---------------------------------------------------------------------------
+# Build stage — compile for every QEMU and hardware preset
+# ---------------------------------------------------------------------------
+
+.build_template:
+  stage: build
+  tags:
+    - build
+  script:
+    - cd test_apps/hotreload_test
+    - touch sdkconfig.local  # hardware presets reference this optional file
+    - idf.py --preset ${PRESET} build
+  artifacts:
+    paths:
+      - test_apps/hotreload_test/build/${PRESET}/
+    expire_in: 1 week
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# QEMU presets (used by QEMU test jobs)
+build:esp32-qemu:
+  extends: .build_template
+  variables:
+    PRESET: esp32-qemu
+
+build:esp32c3-qemu:
+  extends: .build_template
+  variables:
+    PRESET: esp32c3-qemu
+
+build:esp32s3-qemu:
+  extends: .build_template
+  variables:
+    PRESET: esp32s3-qemu
+
+# Hardware presets (verify compilation for all supported targets)
+build:esp32-hardware:
+  extends: .build_template
+  variables:
+    PRESET: esp32-hardware
+
+build:esp32c3-hardware:
+  extends: .build_template
+  variables:
+    PRESET: esp32c3-hardware
+
+build:esp32c6-hardware:
+  extends: .build_template
+  variables:
+    PRESET: esp32c6-hardware
+
+build:esp32p4-hardware:
+  extends: .build_template
+  variables:
+    PRESET: esp32p4-hardware
+
+build:esp32s2-hardware:
+  extends: .build_template
+  variables:
+    PRESET: esp32s2-hardware
+
+build:esp32s2-hardware-nopsram:
+  extends: .build_template
+  variables:
+    PRESET: esp32s2-hardware-nopsram
+
+build:esp32s3-hardware:
+  extends: .build_template
+  variables:
+    PRESET: esp32s3-hardware
+
+build:esp32s3-hardware-nopsram:
+  extends: .build_template
+  variables:
+    PRESET: esp32s3-hardware-nopsram
+
+# ---------------------------------------------------------------------------
+# Test stage — QEMU tests
+# ---------------------------------------------------------------------------
+
+.qemu_test_template:
+  stage: test
+  timeout: 10 minutes
+  tags:
+    - build
+  before_script:
+    - pip install --upgrade esptool pytest-embedded pytest-embedded-idf pytest-embedded-qemu requests pyyaml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# --- Unit tests (QEMU) ---
+
+qemu:unit:esp32:
+  extends: .qemu_test_template
+  needs: ["build:esp32-qemu"]
+  script:
+    - cd test_apps/hotreload_test
+    - >
+      pytest test_hotreload.py -v -s
+      --embedded-services idf,qemu
+      --target esp32
+      --build-dir build/esp32-qemu
+      -k "unit and not hardware and esp32 and not esp32c3 and not esp32s3"
+      --junit-xml=${CI_PROJECT_DIR}/results/qemu-unit-esp32.xml
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/qemu-unit-esp32.xml
+
+qemu:unit:esp32c3:
+  extends: .qemu_test_template
+  needs: ["build:esp32c3-qemu"]
+  script:
+    - cd test_apps/hotreload_test
+    - >
+      pytest test_hotreload.py -v -s
+      --embedded-services idf,qemu
+      --target esp32c3
+      --build-dir build/esp32c3-qemu
+      -k "unit and not hardware and esp32c3"
+      --junit-xml=${CI_PROJECT_DIR}/results/qemu-unit-esp32c3.xml
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/qemu-unit-esp32c3.xml
+
+qemu:unit:esp32s3:
+  extends: .qemu_test_template
+  needs: ["build:esp32s3-qemu"]
+  allow_failure: true  # QEMU doesn't support SOC_I_D_OFFSET translation for code execution
+  script:
+    - cd test_apps/hotreload_test
+    - >
+      pytest test_hotreload.py -v -s
+      --embedded-services idf,qemu
+      --target esp32s3
+      --build-dir build/esp32s3-qemu
+      -k "unit and not hardware and esp32s3"
+      --junit-xml=${CI_PROJECT_DIR}/results/qemu-unit-esp32s3.xml
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/qemu-unit-esp32s3.xml
+
+# --- E2E integration tests (QEMU with networking) ---
+# E2E tests require QEMU networking (OpenETH) and HTTP server timing;
+# allow failures until CI networking is stabilized.
+
+qemu:e2e:esp32:
+  extends: .qemu_test_template
+  needs: ["build:esp32-qemu"]
+  allow_failure: true
+  script:
+    - cd test_apps/hotreload_test
+    - >
+      pytest test_hotreload.py -v -s
+      --embedded-services idf,qemu
+      --target esp32
+      --build-dir build/esp32-qemu
+      -k "e2e and not hardware and esp32 and not esp32c3 and not esp32s3"
+      --junit-xml=${CI_PROJECT_DIR}/results/qemu-e2e-esp32.xml
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/qemu-e2e-esp32.xml
+
+qemu:e2e:esp32c3:
+  extends: .qemu_test_template
+  needs: ["build:esp32c3-qemu"]
+  allow_failure: true
+  script:
+    - cd test_apps/hotreload_test
+    - >
+      pytest test_hotreload.py -v -s
+      --embedded-services idf,qemu
+      --target esp32c3
+      --build-dir build/esp32c3-qemu
+      -k "e2e and not hardware and esp32c3"
+      --junit-xml=${CI_PROJECT_DIR}/results/qemu-e2e-esp32c3.xml
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/qemu-e2e-esp32c3.xml
+
+qemu:e2e:esp32s3:
+  extends: .qemu_test_template
+  needs: ["build:esp32s3-qemu"]
+  allow_failure: true
+  script:
+    - cd test_apps/hotreload_test
+    - >
+      pytest test_hotreload.py -v -s
+      --embedded-services idf,qemu
+      --target esp32s3
+      --build-dir build/esp32s3-qemu
+      -k "e2e and not hardware and esp32s3"
+      --junit-xml=${CI_PROJECT_DIR}/results/qemu-e2e-esp32s3.xml
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/qemu-e2e-esp32s3.xml
+
+# --- Build system tests (no hardware or QEMU needed) ---
+
+test:build_system:
+  stage: test
+  tags:
+    - build
+  needs: ["build:esp32-qemu"]  # needs at least one build to test against
+  script:
+    - pip install pytest
+    - cd test_apps/hotreload_test/tests_build_system
+    - pytest test_rebuild_deps.py -v -s --junit-xml=${CI_PROJECT_DIR}/results/build-system.xml
+  artifacts:
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/build-system.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ---------------------------------------------------------------------------
+# Deploy stage — publish component to registry (version tags only)
+# ---------------------------------------------------------------------------
 
 publish_component:
   stage: deploy
