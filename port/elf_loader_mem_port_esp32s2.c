@@ -190,9 +190,8 @@ bool elf_mem_port_allow_internal_ram_fallback(void)
 esp_err_t elf_mem_port_init_exec_mapping(void *ram, size_t size,
                                           elf_port_mem_ctx_t *ctx)
 {
-    uintptr_t addr = (uintptr_t)ram;
-
 #if CONFIG_SPIRAM
+    uintptr_t addr = (uintptr_t)ram;
     if (is_psram_addr(addr)) {
         return init_mmu(ctx, ram, size);
     }

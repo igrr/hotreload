@@ -18,6 +18,7 @@
  * while maintaining code execution capability.
  */
 
+#include <string.h>
 #include "elf_loader_mem_port.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"

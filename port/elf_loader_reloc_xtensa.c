@@ -13,6 +13,7 @@
  */
 
 #include <string.h>
+#include <inttypes.h>
 #include "esp_log.h"
 #include "elf_loader_port.h"
 
@@ -63,6 +64,7 @@ static inline void write_instr24(uint8_t *ptr, uint32_t instr)
  * @param sym_addr Target symbol address (already relocated)
  * @return ESP_OK on success, error code on failure
  */
+__attribute__((unused))
 static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t sym_addr)
 {
     /* Read instruction bytes */
@@ -79,7 +81,7 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
             int32_t delta = (int32_t)(sym_addr - aligned_pc);
 
             if (delta & 0x3) {
-                ESP_LOGE(TAG, "L32R: target not 4-byte aligned: delta=0x%x", delta);
+                ESP_LOGE(TAG, "L32R: target not 4-byte aligned: delta=0x%" PRIx32, delta);
                 return ESP_ERR_INVALID_ARG;
             }
             delta >>= 2;  /* Divide by 4 for encoding */
@@ -88,7 +90,7 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
              * After dividing by 4: -65536 to -1
              * Note: L32R can only load from addresses BEFORE the instruction */
             if (delta < -32768 || delta > 32767) {
-                ESP_LOGW(TAG, "L32R: offset out of range: %d", delta);
+                ESP_LOGW(TAG, "L32R: offset out of range: %" PRId32, delta);
                 return ESP_ERR_INVALID_SIZE;
             }
 
@@ -96,7 +98,7 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
             instr = (instr & 0xff) | (((uint32_t)delta & 0xffff) << 8);
             write_instr24(location, instr);
 
-            ESP_LOGV(TAG, "SLOT0_OP L32R applied: rel=0x%x sym=0x%x delta=%d",
+            ESP_LOGV(TAG, "SLOT0_OP L32R applied: rel=0x%" PRIxPTR " sym=0x%" PRIxPTR " delta=%" PRId32,
                      rel_addr, sym_addr, delta);
             return ESP_OK;
         }
@@ -110,7 +112,7 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
             /* CALL uses 18-bit offset field, scaled by 4
              * Range: -524288 to 524284 bytes */
             if (delta < -524288 || delta > 524284 || (delta & 0x3)) {
-                ESP_LOGE(TAG, "CALL: offset out of range or misaligned: %d", delta);
+                ESP_LOGE(TAG, "CALL: offset out of range or misaligned: %" PRId32, delta);
                 return ESP_ERR_INVALID_SIZE;
             }
 
@@ -120,7 +122,7 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
             instr = (instr & 0x3f) | encoded;
             write_instr24(location, instr);
 
-            ESP_LOGV(TAG, "SLOT0_OP CALL: rel=0x%x sym=0x%x delta=%d",
+            ESP_LOGV(TAG, "SLOT0_OP CALL: rel=0x%" PRIxPTR " sym=0x%" PRIxPTR " delta=%" PRId32,
                      rel_addr, sym_addr, delta);
             return ESP_OK;
         }
@@ -132,7 +134,7 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
 
             /* J uses 18-bit signed offset (range: -131072 to 131071) */
             if (delta < -131072 || delta > 131071) {
-                ESP_LOGE(TAG, "J: offset out of range: %d", delta);
+                ESP_LOGE(TAG, "J: offset out of range: %" PRId32, delta);
                 return ESP_ERR_INVALID_SIZE;
             }
 
@@ -141,14 +143,14 @@ static esp_err_t apply_slot0_op(uint8_t *location, uintptr_t rel_addr, uintptr_t
             instr = (instr & 0x3f) | encoded;
             write_instr24(location, instr);
 
-            ESP_LOGV(TAG, "SLOT0_OP J: rel=0x%x sym=0x%x delta=%d",
+            ESP_LOGV(TAG, "SLOT0_OP J: rel=0x%" PRIxPTR " sym=0x%" PRIxPTR " delta=%" PRId32,
                      rel_addr, sym_addr, delta);
             return ESP_OK;
         }
 
         default:
             /* Unknown instruction format for SLOT0_OP */
-            ESP_LOGW(TAG, "SLOT0_OP: unsupported opcode 0x%x at 0x%x", op0, rel_addr);
+            ESP_LOGW(TAG, "SLOT0_OP: unsupported opcode 0x%x at 0x%" PRIxPTR, op0, rel_addr);
             return ESP_ERR_NOT_SUPPORTED;
     }
 }
@@ -223,12 +225,12 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
         uint32_t type = elf_reloc_a_get_type(rela);
         int32_t addend = elf_reloc_a_get_addend(rela);
 
-        ESP_LOGD(TAG, "Reloc[%d]: offset=0x%x type=%d addend=%d",
+        ESP_LOGD(TAG, "Reloc[%d]: offset=0x%" PRIxPTR " type=%" PRIu32 " addend=%" PRId32,
                  reloc_count, offset, type, addend);
 
         /* Check if offset is within our loaded section range */
         if (offset < vma_base || offset >= vma_end) {
-            ESP_LOGD(TAG, "Skipping relocation outside loaded range: offset=0x%x", offset);
+            ESP_LOGD(TAG, "Skipping relocation outside loaded range: offset=0x%" PRIxPTR, offset);
             continue;
         }
 
@@ -245,7 +247,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 uintptr_t result_addr = vma_to_ram(mem_ctx, addend, load_base);
                 *location = (uint32_t)result_addr;
                 applied_count++;
-                ESP_LOGV(TAG, "R_XTENSA_RELATIVE: offset=0x%x addend=0x%x -> 0x%x",
+                ESP_LOGV(TAG, "R_XTENSA_RELATIVE: offset=0x%" PRIxPTR " addend=0x%" PRIx32 " -> 0x%" PRIx32,
                          offset, addend, *location);
                 break;
             }
@@ -258,7 +260,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 uintptr_t result_addr = vma_to_ram(mem_ctx, sym_val + addend, load_base);
                 *location = (uint32_t)result_addr;
                 applied_count++;
-                ESP_LOGV(TAG, "R_XTENSA_32: offset=0x%x sym_val=0x%x -> 0x%x",
+                ESP_LOGV(TAG, "R_XTENSA_32: offset=0x%" PRIxPTR " sym_val=0x%" PRIxPTR " -> 0x%" PRIx32,
                          offset, sym_val, *location);
                 break;
             }
@@ -268,14 +270,14 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 /* External symbols (printf, etc.) - address already resolved at link time
                  * sym_val contains the fixed address from the main app's symbol table */
                 uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
-                ESP_LOGV(TAG, "R_XTENSA_JMP_SLOT/PLT: offset=0x%x sym_val=0x%x type=%d",
+                ESP_LOGV(TAG, "R_XTENSA_JMP_SLOT/PLT: offset=0x%" PRIxPTR " sym_val=0x%" PRIxPTR " type=%" PRIu32,
                          offset, sym_val, type);
                 if (sym_val != 0) {
                     *location = (uint32_t)sym_val;
                     applied_count++;
                 } else {
                     /* External symbol not resolved - this is a problem */
-                    ESP_LOGW(TAG, "R_XTENSA_JMP_SLOT/PLT: unresolved symbol at offset 0x%x",
+                    ESP_LOGW(TAG, "R_XTENSA_JMP_SLOT/PLT: unresolved symbol at offset 0x%" PRIxPTR,
                              offset);
                 }
                 break;
@@ -291,7 +293,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                  *
                  * If we see issues with L32R reaching literal pools across regions,
                  * we may need to handle this more carefully. */
-                ESP_LOGD(TAG, "SLOT0_OP: skipping (VMA layout preserved within region), offset=0x%x", offset);
+                ESP_LOGD(TAG, "SLOT0_OP: skipping (VMA layout preserved within region), offset=0x%" PRIxPTR, offset);
                 break;
             }
 
@@ -301,7 +303,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 break;
 
             default:
-                ESP_LOGW(TAG, "Unknown Xtensa relocation type %d at offset 0x%x", type, offset);
+                ESP_LOGW(TAG, "Unknown Xtensa relocation type %" PRIu32 " at offset 0x%" PRIxPTR, type, offset);
                 break;
         }
     }

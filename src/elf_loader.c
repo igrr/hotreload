@@ -17,6 +17,7 @@
  */
 
 #include <string.h>
+#include <inttypes.h>
 #include "elf.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -163,7 +164,7 @@ esp_err_t elf_loader_validate_header(const void *elf_data, size_t elf_size)
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    ESP_LOGD(TAG, "ELF header valid: type=%d, machine=%d, entry=0x%x",
+    ESP_LOGD(TAG, "ELF header valid: type=%d, machine=%d, entry=0x%" PRIx32,
              ehdr->e_type, ehdr->e_machine, ehdr->e_entry);
 
     return ESP_OK;
@@ -296,7 +297,7 @@ esp_err_t elf_loader_calculate_memory_layout(elf_loader_ctx_t *ctx,
         /* Classify based on section name */
         bool is_text = is_text_section(sec_name);
 
-        ESP_LOGD(TAG, "Section %s: addr=0x%x size=0x%x -> %s",
+        ESP_LOGD(TAG, "Section %s: addr=0x%" PRIxPTR " size=0x%" PRIx32 " -> %s",
                  sec_name, addr, size, is_text ? "text" : "data");
 
         if (is_text) {

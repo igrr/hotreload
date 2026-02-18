@@ -13,6 +13,7 @@
  */
 
 #include <string.h>
+#include <inttypes.h>
 #include "esp_log.h"
 #include "soc/soc.h"
 #include "elf_loader_port.h"
@@ -83,7 +84,7 @@ static void patch_plt_for_iram(elf_parser_handle_t parser, void *ram_base, uintp
             continue;
         }
 
-        ESP_LOGD(TAG, "Section %d: '%s' vma=0x%x size=0x%x",
+        ESP_LOGD(TAG, "Section %d: '%s' vma=0x%" PRIxPTR " size=0x%" PRIx32,
                  sec_count, sec_name, elf_section_get_addr(section), elf_section_get_size(section));
 
         if (strcmp(sec_name, ".plt") != 0) {
@@ -94,11 +95,11 @@ static void patch_plt_for_iram(elf_parser_handle_t parser, void *ram_base, uintp
         uint32_t plt_size = elf_section_get_size(section);
 
         if (plt_vma == 0 || plt_size == 0) {
-            ESP_LOGW(TAG, "Invalid .plt section: vma=0x%x size=%d", plt_vma, plt_size);
+            ESP_LOGW(TAG, "Invalid .plt section: vma=0x%" PRIxPTR " size=%" PRIu32, plt_vma, plt_size);
             return;
         }
 
-        ESP_LOGD(TAG, "Patching .plt section at vma=0x%x size=%d", plt_vma, plt_size);
+        ESP_LOGD(TAG, "Patching .plt section at vma=0x%" PRIxPTR " size=%" PRIu32, plt_vma, plt_size);
 
         /* Calculate adjustment for AUIPC: subtract SOC_I_D_OFFSET >> 12 from immediate
          * AUIPC does: rd = PC + (imm << 12)
@@ -119,7 +120,7 @@ static void patch_plt_for_iram(elf_parser_handle_t parser, void *ram_base, uintp
             int32_t new_imm = imm + adjust;
             instr = (instr & 0xFFF) | ((uint32_t)new_imm << 12);
             plt_base[0] = instr;
-            ESP_LOGD(TAG, "Patched PLT header AUIPC: imm 0x%x -> 0x%x", imm & 0xFFFFF, new_imm & 0xFFFFF);
+            ESP_LOGD(TAG, "Patched PLT header AUIPC: imm 0x%x -> 0x%x", (unsigned)(imm & 0xFFFFF), (unsigned)(new_imm & 0xFFFFF));
         }
 
         /* Process each PLT entry (starting at offset 0x20 = 32 bytes from PLT start)
@@ -134,12 +135,12 @@ static void patch_plt_for_iram(elf_parser_handle_t parser, void *ram_base, uintp
                 int32_t new_imm = imm + adjust;
                 instr = (instr & 0xFFF) | ((uint32_t)new_imm << 12);
                 entry[0] = instr;
-                ESP_LOGD(TAG, "Patched PLT entry at 0x%x: AUIPC imm 0x%x -> 0x%x",
-                         plt_vma + offset, imm & 0xFFFFF, new_imm & 0xFFFFF);
+                ESP_LOGD(TAG, "Patched PLT entry at 0x%" PRIxPTR ": AUIPC imm 0x%x -> 0x%x",
+                         plt_vma + (uintptr_t)offset, (unsigned)(imm & 0xFFFFF), (unsigned)(new_imm & 0xFFFFF));
             }
         }
 
-        ESP_LOGD(TAG, "Patched PLT for IRAM/DRAM offset (SOC_I_D_OFFSET=0x%x)", SOC_I_D_OFFSET);
+        ESP_LOGD(TAG, "Patched PLT for IRAM/DRAM offset (SOC_I_D_OFFSET=0x%" PRIx32 ")", (uint32_t)SOC_I_D_OFFSET);
         return;  /* Only one .plt section */
     }
 
@@ -183,12 +184,12 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
         uint32_t type = elf_reloc_a_get_type(rela);
         int32_t addend = elf_reloc_a_get_addend(rela);
 
-        ESP_LOGD(TAG, "Reloc[%d]: offset=0x%x type=%d addend=%d",
+        ESP_LOGD(TAG, "Reloc[%d]: offset=0x%" PRIxPTR " type=%" PRIu32 " addend=%" PRId32,
                  reloc_count, offset, type, addend);
 
         /* Check if offset is within our loaded section range */
         if (offset < vma_base || offset >= vma_base + ram_size) {
-            ESP_LOGD(TAG, "Skipping relocation outside loaded range: offset=0x%x", offset);
+            ESP_LOGD(TAG, "Skipping relocation outside loaded range: offset=0x%" PRIxPTR, offset);
             continue;
         }
 
@@ -206,7 +207,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 /* Formula: *location = load_base + addend */
                 *location = (uint32_t)(load_base + addend);
                 applied_count++;
-                ESP_LOGV(TAG, "R_RISCV_RELATIVE: offset=0x%x -> 0x%x",
+                ESP_LOGV(TAG, "R_RISCV_RELATIVE: offset=0x%" PRIxPTR " -> 0x%" PRIx32,
                          offset, *location);
                 break;
 
@@ -215,7 +216,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
                 *location = (uint32_t)(load_base + sym_val + addend);
                 applied_count++;
-                ESP_LOGV(TAG, "R_RISCV_32: offset=0x%x sym_val=0x%x -> 0x%x",
+                ESP_LOGV(TAG, "R_RISCV_32: offset=0x%" PRIxPTR " sym_val=0x%" PRIxPTR " -> 0x%" PRIx32,
                          offset, sym_val, *location);
                 break;
             }
@@ -223,12 +224,12 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
             case R_RISCV_JUMP_SLOT: {
                 /* External function calls through GOT/PLT */
                 uintptr_t sym_val = elf_reloc_a_get_sym_val(rela);
-                ESP_LOGV(TAG, "R_RISCV_JUMP_SLOT: offset=0x%x sym_val=0x%x", offset, sym_val);
+                ESP_LOGV(TAG, "R_RISCV_JUMP_SLOT: offset=0x%" PRIxPTR " sym_val=0x%" PRIxPTR, offset, sym_val);
                 if (sym_val != 0) {
                     *location = (uint32_t)sym_val;
                     applied_count++;
                 } else {
-                    ESP_LOGW(TAG, "R_RISCV_JUMP_SLOT: unresolved symbol at offset 0x%x", offset);
+                    ESP_LOGW(TAG, "R_RISCV_JUMP_SLOT: unresolved symbol at offset 0x%" PRIxPTR, offset);
                 }
                 break;
             }
@@ -272,7 +273,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 *(uint32_t *)location = instr;
 
                 applied_count++;
-                ESP_LOGD(TAG, "R_RISCV_PCREL_HI20: offset=0x%x sym=0x%x pc=0x%x pcrel=%d hi20=0x%x",
+                ESP_LOGD(TAG, "R_RISCV_PCREL_HI20: offset=0x%" PRIxPTR " sym=0x%" PRIxPTR " pc=0x%" PRIxPTR " pcrel=%" PRId32 " hi20=0x%" PRIx32,
                          offset, sym_addr, pc_addr, pcrel_offset, hi20);
                 break;
             }
@@ -297,7 +298,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                     }
                 }
                 if (!found) {
-                    ESP_LOGW(TAG, "R_RISCV_PCREL_LO12_I: no HI20 found for AUIPC at VMA 0x%x", sym_val);
+                    ESP_LOGW(TAG, "R_RISCV_PCREL_LO12_I: no HI20 found for AUIPC at VMA 0x%" PRIxPTR, sym_val);
                     break;
                 }
 
@@ -312,7 +313,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 *(uint32_t *)location = instr;
 
                 applied_count++;
-                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_I: offset=0x%x auipc=0x%x lo12=0x%x", offset, sym_val, lo12 & 0xFFF);
+                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_I: offset=0x%" PRIxPTR " auipc=0x%" PRIxPTR " lo12=0x%" PRIx32, offset, sym_val, lo12 & 0xFFF);
                 break;
             }
 
@@ -333,7 +334,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                     }
                 }
                 if (!found) {
-                    ESP_LOGW(TAG, "R_RISCV_PCREL_LO12_S: no HI20 found for AUIPC at VMA 0x%x", sym_val);
+                    ESP_LOGW(TAG, "R_RISCV_PCREL_LO12_S: no HI20 found for AUIPC at VMA 0x%" PRIxPTR, sym_val);
                     break;
                 }
 
@@ -349,7 +350,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                 *(uint32_t *)location = instr;
 
                 applied_count++;
-                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_S: offset=0x%x lo12=0x%x", offset, lo12 & 0xFFF);
+                ESP_LOGD(TAG, "R_RISCV_PCREL_LO12_S: offset=0x%" PRIxPTR " lo12=0x%" PRIx32, offset, lo12 & 0xFFF);
                 break;
             }
 
@@ -358,7 +359,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
             case R_RISCV_LO12_S:
                 /* Absolute HI20/LO12 relocations for LUI + load/store/addi
                  * VMA layout preserved, so these should be fine as-is */
-                ESP_LOGD(TAG, "R_RISCV_ABS: skipping (VMA layout preserved), type=%d offset=0x%x",
+                ESP_LOGD(TAG, "R_RISCV_ABS: skipping (VMA layout preserved), type=%" PRIu32 " offset=0x%" PRIxPTR,
                          type, offset);
                 break;
 
@@ -372,7 +373,7 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
                  * These are PC-relative with 8-bit (branch) or 11-bit (jump) offsets.
                  * Since VMA layout is preserved, the relative offsets are correct.
                  * The jumps to PLT entries work correctly after PLT patching. */
-                ESP_LOGD(TAG, "R_RISCV_RVC: skipping (VMA layout preserved), type=%d offset=0x%x",
+                ESP_LOGD(TAG, "R_RISCV_RVC: skipping (VMA layout preserved), type=%" PRIu32 " offset=0x%" PRIxPTR,
                          type, offset);
                 break;
 
@@ -384,12 +385,12 @@ esp_err_t elf_port_apply_relocations(elf_parser_handle_t parser,
             case R_RISCV_SET32:
                 /* These are typically used for DWARF debug info and exception tables
                  * Skip for now - not needed for basic code execution */
-                ESP_LOGD(TAG, "R_RISCV_ADD/SUB/SET: skipping debug reloc type=%d offset=0x%x",
+                ESP_LOGD(TAG, "R_RISCV_ADD/SUB/SET: skipping debug reloc type=%" PRIu32 " offset=0x%" PRIxPTR,
                          type, offset);
                 break;
 
             default:
-                ESP_LOGW(TAG, "Unknown RISC-V relocation type %d at offset 0x%x", type, offset);
+                ESP_LOGW(TAG, "Unknown RISC-V relocation type %" PRIu32 " at offset 0x%" PRIxPTR, type, offset);
                 break;
         }
     }

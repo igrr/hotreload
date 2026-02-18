@@ -21,6 +21,18 @@ MAIN_SRC = TEST_APP_DIR / "main" / "hotreload.c"
 RELOADABLE_SRC = TEST_APP_DIR / "components" / "reloadable" / "reloadable.c"
 
 
+def warm_up_build(build_dir: Path) -> None:
+    """Run a no-op build to stabilize CMake state after artifact extraction.
+
+    CI artifact extraction sets uniform timestamps on all files which confuses
+    CMake's dependency tracking.  A warm-up build lets CMake re-link once so
+    subsequent incremental builds only rebuild what actually changed.
+    """
+    result = run_idf_command(["build"], build_dir=build_dir)
+    if result.returncode != 0:
+        raise AssertionError("Warm-up build failed")
+
+
 def find_build_dir() -> Path:
     """Find the active build directory (handles CMake presets)."""
     build_base = TEST_APP_DIR / "build"
@@ -44,10 +56,14 @@ def get_build_paths(build_dir: Path) -> tuple[Path, Path, Path]:
     return main_elf, reloadable_so, ld_script
 
 
-def run_idf_command(args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
+def run_idf_command(args: list[str], timeout: int = 300, build_dir: Path | None = None) -> subprocess.CompletedProcess:
     """Run an idf.py command in the test app directory."""
+    cmd = ["idf.py"]
+    if build_dir is not None:
+        cmd += ["-B", str(build_dir)]
+    cmd += args
     result = subprocess.run(
-        ["idf.py"] + args,
+        cmd,
         cwd=TEST_APP_DIR,
         capture_output=True,
         text=True,
@@ -84,7 +100,7 @@ def test_reloadable_rebuild_on_linker_script_change():
     if not build_dir.exists():
         print("  No build found, doing clean build...")
         run_idf_command(["fullclean"], timeout=60)
-        result = run_idf_command(["build"])
+        result = run_idf_command(["build"], build_dir=build_dir)
         if result.returncode != 0:
             raise AssertionError("Initial build failed")
         build_dir = find_build_dir()
@@ -96,11 +112,15 @@ def test_reloadable_rebuild_on_linker_script_change():
     # Verify build artifacts exist
     if not main_elf.exists() or not reloadable_so.exists():
         print("  Build artifacts missing, rebuilding...")
-        result = run_idf_command(["build"])
+        result = run_idf_command(["build"], build_dir=build_dir)
         if result.returncode != 0:
             raise AssertionError("Build failed")
 
     print("  Build exists!")
+
+    # Warm-up: stabilize CMake state (needed after CI artifact extraction)
+    print("  Running warm-up build to stabilize CMake state...")
+    warm_up_build(build_dir)
 
     # Step 2: Record timestamps
     print("Step 2: Recording timestamps...")
@@ -126,7 +146,7 @@ def test_reloadable_rebuild_on_linker_script_change():
 
     # Step 4: Incremental build
     print("Step 4: Incremental build...")
-    result = run_idf_command(["build"])
+    result = run_idf_command(["build"], build_dir=build_dir)
     if result.returncode != 0:
         print(f"Build stdout:\n{result.stdout}")
         print(f"Build stderr:\n{result.stderr}")
@@ -185,7 +205,7 @@ def test_main_elf_not_rebuilt_on_reloadable_change():
     if not build_dir.exists():
         print("  No build found, doing clean build...")
         run_idf_command(["fullclean"], timeout=60)
-        result = run_idf_command(["build"])
+        result = run_idf_command(["build"], build_dir=build_dir)
         if result.returncode != 0:
             print(f"Build stdout:\n{result.stdout}")
             print(f"Build stderr:\n{result.stderr}")
@@ -199,11 +219,15 @@ def test_main_elf_not_rebuilt_on_reloadable_change():
     # Verify build artifacts exist
     if not main_elf.exists() or not reloadable_so.exists():
         print("  Build artifacts missing, rebuilding...")
-        result = run_idf_command(["build"])
+        result = run_idf_command(["build"], build_dir=build_dir)
         if result.returncode != 0:
             raise AssertionError("Build failed")
 
     print("  Build exists!")
+
+    # Warm-up: stabilize CMake state (needed after CI artifact extraction)
+    print("  Running warm-up build to stabilize CMake state...")
+    warm_up_build(build_dir)
 
     # Step 2: Record timestamps
     print("Step 2: Recording timestamps...")
@@ -224,7 +248,7 @@ def test_main_elf_not_rebuilt_on_reloadable_change():
 
     # Step 4: Incremental build
     print("Step 4: Incremental build...")
-    result = run_idf_command(["build"])
+    result = run_idf_command(["build"], build_dir=build_dir)
     if result.returncode != 0:
         print(f"Build stdout:\n{result.stdout}")
         print(f"Build stderr:\n{result.stderr}")
