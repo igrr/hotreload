@@ -151,7 +151,6 @@ qemu:unit:esp32c3:
 qemu:unit:esp32s3:
   extends: .qemu_test_template
   needs: ["build:esp32s3-qemu"]
-  allow_failure: true  # QEMU doesn't support SOC_I_D_OFFSET translation for code execution
   script:
     - cd test_apps/hotreload_test
     - >
