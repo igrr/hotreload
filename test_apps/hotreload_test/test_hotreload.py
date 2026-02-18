@@ -24,6 +24,7 @@ Supported targets are defined in idf_component.yml at the project root.
 """
 
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -60,7 +61,14 @@ QEMU_NETWORK_TARGETS = ["esp32", "esp32c3", "esp32s3"]
 # Hardware targets - read from component manifest
 SUPPORTED_TARGETS = get_supported_targets()
 RELOADABLE_SRC = PROJECT_DIR / "components" / "reloadable" / "reloadable.c"
-SERVER_PORT = 8080
+DEVICE_PORT = 8080  # Port the device listens on (inside QEMU / on hardware)
+
+
+def get_free_port() -> int:
+    """Find and return a free TCP port on localhost."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def get_reloadable_elf_path(build_dir: Path | str | None = None) -> Path:
@@ -234,10 +242,10 @@ def test_hotreload_unit_tests(dut):
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
-    ["-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:8080-:8080"],
+    [f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{{host_port}}-:{DEVICE_PORT}"],
     indirect=True,
 )
-def test_hot_reload_e2e(dut, app, original_code):
+def test_hot_reload_e2e(dut, app, original_code, qemu_host_port):
     """
     End-to-end test for hot reload functionality in QEMU.
 
@@ -252,9 +260,12 @@ def test_hot_reload_e2e(dut, app, original_code):
     """
     print("\n=== Starting Hot Reload E2E Test ===\n")
 
+    host_port = qemu_host_port
+
     # Get build directory from app fixture (supports CMake presets)
     build_dir = Path(app.binary_path)
     print(f"  Using build directory: {build_dir}")
+    print(f"  Using host port: {host_port}")
 
     # Step 0: Wait for Unity menu and select the integration test
     print("Step 0: Selecting integration test from Unity menu...")
@@ -270,7 +281,7 @@ def test_hot_reload_e2e(dut, app, original_code):
 
     # Step 2: Wait for server to start
     print("Step 2: Waiting for HTTP server to start...")
-    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=30)
+    dut.expect(rf"Hotreload server started (at http://[\d.]+:{DEVICE_PORT}|on port {DEVICE_PORT})", timeout=30)
     print("  Server started!")
 
     # Give the network stack a moment to be fully ready
@@ -279,8 +290,8 @@ def test_hot_reload_e2e(dut, app, original_code):
     # Step 3: Verify server is accessible
     print("Step 3: Verifying server is accessible...")
     for i in range(15):
-        if check_server_status(SERVER_PORT):
-            print(f"  Server responding on port {SERVER_PORT}")
+        if check_server_status(host_port):
+            print(f"  Server responding on port {host_port}")
             break
         print(f"  Attempt {i+1}/15 - waiting...")
         time.sleep(1)
@@ -299,7 +310,7 @@ def test_hot_reload_e2e(dut, app, original_code):
 
     # Step 6: Upload ELF (app will reload via cooperative polling)
     print("Step 6: Uploading new ELF...")
-    response = upload_elf(SERVER_PORT, build_dir)
+    response = upload_elf(host_port, build_dir)
     print(f"  Server response: {response.status_code} - {response.text.strip()}")
     assert response.status_code == 200, f"Upload failed: {response.text}"
 
@@ -323,10 +334,10 @@ def test_hot_reload_e2e(dut, app, original_code):
 @pytest.mark.parametrize("embedded_services", ["idf,qemu"], indirect=True)
 @pytest.mark.parametrize(
     "qemu_extra_args",
-    ["-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:8080-:8080"],
+    [f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{{host_port}}-:{DEVICE_PORT}"],
     indirect=True,
 )
-def test_idf_reload_command(dut, app, original_code):
+def test_idf_reload_command(dut, app, original_code, qemu_host_port):
     """
     Test the idf.py reload command end-to-end in QEMU.
 
@@ -344,9 +355,12 @@ def test_idf_reload_command(dut, app, original_code):
     """
     print("\n=== Testing idf.py reload Command ===\n")
 
+    host_port = qemu_host_port
+
     # Get build directory from app fixture (supports CMake presets)
     build_dir = Path(app.binary_path)
     print(f"  Using build directory: {build_dir}")
+    print(f"  Using host port: {host_port}")
 
     # Step 0: Wait for Unity menu and select the integration test
     print("Step 0: Selecting integration test from Unity menu...")
@@ -361,7 +375,7 @@ def test_idf_reload_command(dut, app, original_code):
 
     # Step 2: Wait for server to start
     print("Step 2: Waiting for HTTP server to start...")
-    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=30)
+    dut.expect(rf"Hotreload server started (at http://[\d.]+:{DEVICE_PORT}|on port {DEVICE_PORT})", timeout=30)
     print("  Server started!")
 
     # Give the network stack a moment to be fully ready
@@ -370,8 +384,8 @@ def test_idf_reload_command(dut, app, original_code):
     # Step 3: Verify server is accessible
     print("Step 3: Verifying server is accessible...")
     for i in range(15):
-        if check_server_status(SERVER_PORT):
-            print(f"  Server responding on port {SERVER_PORT}")
+        if check_server_status(host_port):
+            print(f"  Server responding on port {host_port}")
             break
         print(f"  Attempt {i+1}/15 - waiting...")
         time.sleep(1)
@@ -384,8 +398,8 @@ def test_idf_reload_command(dut, app, original_code):
     print("  Code modified!")
 
     # Step 5: Run idf.py reload command
-    print("Step 5: Running 'idf.py reload --url http://127.0.0.1:8080'...")
-    result = run_idf_reload(f"http://127.0.0.1:{SERVER_PORT}", build_dir)
+    print(f"Step 5: Running 'idf.py reload --url http://127.0.0.1:{host_port}'...")
+    result = run_idf_reload(f"http://127.0.0.1:{host_port}", build_dir)
 
     print(f"  Return code: {result.returncode}")
     if result.stdout:
@@ -492,13 +506,12 @@ def test_idf_watch_with_qemu(target, original_code):
     """
     print("\n=== Testing idf.py watch + qemu Combined ===\n")
 
-    # Use a different port (8081) to avoid conflicts with other tests
-    test_port = 8081
+    test_port = get_free_port()
 
     # Step 1: Start idf.py watch qemu with network forwarding
     # Use -B to specify build directory, which is required for loading component extensions
     build_dir = f"build/{target}-qemu"
-    qemu_extra = f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:8080"
+    qemu_extra = f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:{DEVICE_PORT}"
     # ESP32-S3 needs explicit PSRAM size to match what conftest provides
     # for pytest-embedded tests (default 32M causes crashes in QEMU)
     if target == "esp32s3":
@@ -548,7 +561,7 @@ def test_idf_watch_with_qemu(target, original_code):
             "Should see initial greeting"
         print("  Initial load confirmed!")
 
-        assert capture.wait_for_stdout(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=30), \
+        assert capture.wait_for_stdout(rf"Hotreload server started (at http://[\d.]+:{DEVICE_PORT}|on port {DEVICE_PORT})", timeout=30), \
             "Server should start"
         print("  Server started!")
 
@@ -701,12 +714,13 @@ def test_hot_reload_e2e_hardware(dut, app, original_code):
     dut.expect(r"Hello.*from initial load", timeout=120)
     print("  Initial load confirmed!")
 
-    # Step 3: Wait for server to start (starts after initial load)
+    # Step 3: Wait for server to start and extract port from log
     print("Step 3: Waiting for HTTP server to start...")
-    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=60)
-    print("  Server started!")
+    match = dut.expect(r"Hotreload server started (?:at http://[\d.]+:(\d+)|on port (\d+))", timeout=60)
+    device_port = int((match.group(1) or match.group(2)).decode() if isinstance(match.group(1) or match.group(2), bytes) else (match.group(1) or match.group(2)))
+    print(f"  Server started on port {device_port}!")
 
-    device_url = f"http://{device_ip}:8080"
+    device_url = f"http://{device_ip}:{device_port}"
 
     # Give the network stack a moment to be fully ready
     time.sleep(3)
@@ -771,7 +785,7 @@ def test_idf_reload_command_hardware(dut, app, original_code):
     """
     Test the idf.py reload command on real hardware.
 
-    Discovers the device IP from serial output and runs reload.
+    Discovers the device IP and port from serial output and runs reload.
     """
     print("\n=== Testing idf.py reload Command on Hardware ===\n")
 
@@ -789,17 +803,18 @@ def test_idf_reload_command_hardware(dut, app, original_code):
     print("Step 1: Waiting for network connectivity...")
     device_ip = get_device_ip_from_serial(dut, timeout=60)
     print(f"  Device IP: {device_ip}")
-    device_url = f"http://{device_ip}:8080"
 
     # Step 2: Wait for initial load (happens during ELF load, before server starts)
     print("Step 2: Waiting for initial reloadable function call...")
     dut.expect(r"Hello.*from initial load", timeout=120)
     print("  Initial load confirmed!")
 
-    # Step 3: Wait for server to start (starts after initial load)
+    # Step 3: Wait for server to start and extract port from log
     print("Step 3: Waiting for HTTP server to start...")
-    dut.expect(r"Hotreload server started (at http://[\d.]+:8080|on port 8080)", timeout=60)
-    print("  Server started!")
+    match = dut.expect(r"Hotreload server started (?:at http://[\d.]+:(\d+)|on port (\d+))", timeout=60)
+    device_port = int((match.group(1) or match.group(2)).decode() if isinstance(match.group(1) or match.group(2), bytes) else (match.group(1) or match.group(2)))
+    device_url = f"http://{device_ip}:{device_port}"
+    print(f"  Server started at {device_url}!")
 
     # Give the network stack a moment
     time.sleep(3)
