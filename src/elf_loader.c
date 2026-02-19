@@ -733,7 +733,9 @@ void *elf_loader_get_symbol(elf_loader_ctx_t *ctx, const char *name)
             uint8_t sym_type = elf_symbol_get_type(sym);
             uintptr_t result_addr;
             if (sym_type == STT_FUNC) {
-                result_addr = elf_port_to_exec_addr(&ctx->text_mem_ctx, data_addr);
+                const elf_port_mem_ctx_t *exec_ctx = ctx->split_alloc
+                    ? &ctx->text_mem_ctx : &ctx->mem_ctx;
+                result_addr = elf_port_to_exec_addr(exec_ctx, data_addr);
                 ESP_LOGD(TAG, "Function '%s': data=%p -> exec=%p",
                          name, (void *)data_addr, (void *)result_addr);
             } else {
