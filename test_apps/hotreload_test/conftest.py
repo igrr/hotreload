@@ -43,26 +43,28 @@ def qemu_extra_args(request, target, qemu_host_port):
     """
     Provide target-specific QEMU extra arguments.
 
+    All targets: disable the timer-group watchdog via QEMU device property
+    (QEMU instruction timing differs from real hardware and can trigger
+    spurious WDT timeouts).
+
     When the test is parametrized with qemu_extra_args containing a hostfwd
     placeholder ``{host_port}``, it will be replaced with the dynamically
     allocated port from the ``qemu_host_port`` fixture.
 
-    ESP32-S3 QEMU is started with -m 4M to enable PSRAM emulation.
+    ESP32-S3: started with -m 4M to enable PSRAM emulation.
     This works for both PSRAM and no-PSRAM configurations:
     - With CONFIG_SPIRAM=y: app uses PSRAM for code execution
     - With CONFIG_SPIRAM=n: app ignores QEMU's PSRAM, uses internal RAM
       (requires CONFIG_ESP_SYSTEM_MEMPROT=n for code execution)
     """
-    # Check if there's an explicit parametrized value
+    # Network emulation seems to trip the WDT occasionally
+    args = [f"-global driver=timer.{target}.timg,property=wdt_disable,value=true"]
+
     if hasattr(request, 'param') and request.param:
-        base_args = request.param.format(host_port=qemu_host_port)
-    else:
-        base_args = ""
+        args.append(request.param.format(host_port=qemu_host_port))
 
     # Add PSRAM for ESP32-S3 (harmless if app doesn't use it)
     if target == "esp32s3":
-        if base_args:
-            return f"{base_args} -m 4M"
-        return "-m 4M"
+        args.append("-m 4M")
 
-    return base_args if base_args else None
+    return " ".join(args)

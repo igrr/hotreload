@@ -518,6 +518,8 @@ def test_idf_watch_with_qemu(target, original_code):
     # Use -B to specify build directory, which is required for loading component extensions
     build_dir = f"build/{target}-qemu"
     qemu_extra = f"-nic user,model=open_eth,id=lo0,hostfwd=tcp:127.0.0.1:{test_port}-:{DEVICE_PORT}"
+    # Network emulation seems to trip the WDT occasionally
+    qemu_extra += f" -global driver=timer.{target}.timg,property=wdt_disable,value=true"
     # ESP32-S3 needs explicit PSRAM size to match what conftest provides
     # for pytest-embedded tests (default 32M causes crashes in QEMU)
     if target == "esp32s3":
