@@ -194,7 +194,7 @@ def check_server_status(port: int) -> bool:
 
 
 @pytest.fixture
-def original_code(request):
+def original_code(request, port_app_cache):
     """Pytest fixture to restore original code and rebuild after test.
 
     This ensures test isolation: the source file AND the build artifacts
@@ -217,6 +217,12 @@ def original_code(request):
         build_dir = request.config.getoption("build_dir", None)
         if build_dir:
             rebuild_reloadable(Path(build_dir))
+    # Clear pytest-embedded's port-app cache so the next test re-flashes.
+    # The cache tracks (port → binary_path) and skips flashing when the
+    # main app binary path hasn't changed.  But E2E tests modify
+    # reloadable_stripped.so (a separate flash partition) which the cache
+    # doesn't track — so we must invalidate it after rebuilding.
+    port_app_cache.clear()
 
 
 @pytest.mark.host_test

@@ -1,13 +1,14 @@
 # Hardware-specific configuration
-# This file is applied when building for real ESP32 hardware
-# Note: Chip-specific files (sdkconfig.defaults.<chip>) are listed AFTER this file
+# This file is applied when building for real ESP32 hardware.
+# Chip-specific files (sdkconfig.defaults.<chip>) are listed AFTER this file
 # in CMakePresets.json, so they can override these settings.
 
-# Disable networking by default for basic unit tests
-# For E2E tests that need networking, enable in chip-specific sdkconfig.defaults.<chip>
-# or create a sdkconfig.local with your WiFi credentials
+# Disable networking by default for unit tests.
+# Chips that need networking for E2E tests (e.g. ESP32-P4 with Ethernet)
+# re-enable it in their chip-specific sdkconfig.defaults.<chip>.
+# Users can also enable WiFi via sdkconfig.local with their credentials.
 CONFIG_EXAMPLE_CONNECT_WIFI=n
 CONFIG_EXAMPLE_CONNECT_ETHERNET=n
 
-# Disable OpenETH (QEMU-only)
+# Disable OpenETH (QEMU-only virtual NIC)
 CONFIG_ETH_USE_OPENETH=n
