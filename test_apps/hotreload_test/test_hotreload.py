@@ -23,6 +23,8 @@ Run unit tests (hardware):
 Supported targets are defined in idf_component.yml at the project root.
 """
 
+import hashlib
+import hmac as hmac_module
 import os
 import socket
 import subprocess
@@ -87,6 +89,30 @@ def get_reloadable_elf_path(build_dir: Path | str | None = None) -> Path:
         if not build_dir.is_absolute():
             build_dir = PROJECT_DIR / build_dir
     return build_dir / "esp-idf" / "reloadable" / "reloadable_stripped.so"
+
+
+def load_hmac_key(build_dir: Path | str | None = None) -> bytes | None:
+    """Load the HMAC key from the build directory."""
+    if build_dir is None:
+        build_dir = PROJECT_DIR / "build"
+    else:
+        build_dir = Path(build_dir)
+        if not build_dir.is_absolute():
+            build_dir = PROJECT_DIR / build_dir
+    key_path = build_dir / "hotreload_hmac_key.bin"
+    if key_path.exists():
+        return key_path.read_bytes()
+    return None
+
+
+def _add_hmac_headers(headers: dict, elf_data: bytes, build_dir: Path | str | None = None) -> None:
+    """Add HMAC authentication headers to a request headers dict."""
+    hmac_key = load_hmac_key(build_dir)
+    if hmac_key:
+        headers["X-Hotreload-SHA256"] = hashlib.sha256(elf_data).hexdigest()
+        headers["X-Hotreload-HMAC"] = hmac_module.new(
+            hmac_key, elf_data, hashlib.sha256
+        ).hexdigest()
 
 
 # Default path for QEMU tests (uses standard build directory)
@@ -174,11 +200,14 @@ def upload_elf(port: int, build_dir: Path | str | None = None) -> requests.Respo
     with open(elf_path, "rb") as f:
         elf_data = f.read()
 
+    headers = {"Content-Type": "application/octet-stream"}
+    _add_hmac_headers(headers, elf_data, build_dir)
+
     print(f"  Uploading {len(elf_data)} bytes to {url}")
     response = requests.post(
         url,
         data=elf_data,
-        headers={"Content-Type": "application/octet-stream"},
+        headers=headers,
         timeout=30,
     )
     return response
@@ -764,11 +793,13 @@ def test_hot_reload_e2e_hardware(dut, app, original_code):
     elf_path = get_reloadable_elf_path(build_dir)
     with open(elf_path, "rb") as f:
         elf_data = f.read()
+    headers = {"Content-Type": "application/octet-stream"}
+    _add_hmac_headers(headers, elf_data, build_dir)
     print(f"  Uploading {len(elf_data)} bytes to {url}")
     response = requests.post(
         url,
         data=elf_data,
-        headers={"Content-Type": "application/octet-stream"},
+        headers=headers,
         timeout=30,
     )
     print(f"  Server response: {response.status_code} - {response.text.strip()}")

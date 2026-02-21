@@ -197,19 +197,14 @@ void app_main(void) {
 | `/pending` | GET | Check if an update is pending reload |
 | `/status` | GET | Check server status |
 
-### Upload with curl
-
-```bash
-# Build the reloadable ELF
-idf.py build
-
-# Upload (reload happens when app polls hotreload_update_available())
-curl -X POST --data-binary @build/esp-idf/reloadable/libreloadable_stripped.so \
-    http://192.168.1.100:8080/upload
-
-# Check if update is pending
-curl http://192.168.1.100:8080/pending
-```
+Uploads are authenticated with HMAC-SHA256. The client must send
+`X-Hotreload-SHA256` (hex-encoded SHA-256 of the request body) and
+`X-Hotreload-HMAC` (hex-encoded HMAC-SHA256 of the body, keyed with a shared
+secret). The secret is generated at build time and used automatically by the
+`idf.py` commands below. Note that this scheme does not protect against replay
+attacks and does not encrypt the transport. The hot reload server should only be
+used during development on a private network and should never be left enabled in
+a production deployment.
 
 ### Using idf.py Commands
 
