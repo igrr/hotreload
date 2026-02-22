@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.10.0 (2026-02-22)
+
+### Feat
+
+- **server**: add HMAC-SHA256 authentication to upload endpoint
+- **ci**: add build and QEMU test stages to CI pipeline
+
+### Fix
+
+- **ci**: disable QEMU WDT via timer-group device property
+- **test**: clear port-app cache after E2E test rebuild to prevent stale flash
+- **test**: standardize sdkconfig layering so chip-specific overrides hardware defaults
+- **elf_loader**: use correct mem_ctx for symbol address translation
+- **ci**: remove allow_failure from esp32s3 QEMU test job
+- **test**: bind e2e tests to random host port instead of fixed 8080
+
 ## v0.9.0 (2026-02-11)
 
 ### Feat
