@@ -16,6 +16,7 @@ The watch command can be combined with monitor or qemu commands:
 import atexit
 import fnmatch
 import hashlib
+import hmac as hmac_module
 import os
 import subprocess
 import sys
@@ -53,6 +54,7 @@ class WatchOptions:
         debounce: float,
         poll_interval: float,
         verbose: bool,
+        hmac_key: Optional[bytes] = None,
     ) -> None:
         """Start the file watcher in a background thread."""
         self._stop_event = threading.Event()
@@ -103,7 +105,7 @@ class WatchOptions:
                         continue
 
                     yellow_print(f"[hotreload] Uploading {elf_path.name}...")
-                    if _upload_elf(url, elf_path, verbose):
+                    if _upload_elf(url, elf_path, verbose, hmac_key=hmac_key):
                         yellow_print("[hotreload] Upload complete (app will reload at next safe point)")
                     else:
                         yellow_print("[hotreload] Upload FAILED!")
@@ -152,8 +154,17 @@ def _find_reloadable_elf(build_dir: Path) -> Optional[Path]:
     return None
 
 
-def _upload_elf(url: str, elf_path: Path, verbose: bool = False) -> bool:
-    """Upload ELF to device (reload happens via cooperative polling in app)."""
+def _load_hmac_key(build_dir: Path) -> Optional[bytes]:
+    """Load the HMAC key from the build directory."""
+    key_path = build_dir / "hotreload_hmac_key.bin"
+    if key_path.exists():
+        return key_path.read_bytes()
+    return None
+
+
+def _upload_elf(url: str, elf_path: Path, verbose: bool = False,
+                hmac_key: Optional[bytes] = None) -> bool:
+    """Upload ELF to device with HMAC authentication."""
     endpoint = f"{url.rstrip('/')}/upload"
 
     if verbose:
@@ -168,6 +179,16 @@ def _upload_elf(url: str, elf_path: Path, verbose: bool = False) -> bool:
         "Content-Type": "application/octet-stream",
         "Content-Length": str(len(elf_data)),
     }
+
+    # Add HMAC authentication headers
+    if hmac_key is not None:
+        sha256_hex = hashlib.sha256(elf_data).hexdigest()
+        hmac_hex = hmac_module.new(hmac_key, elf_data, hashlib.sha256).hexdigest()
+        headers["X-Hotreload-SHA256"] = sha256_hex
+        headers["X-Hotreload-HMAC"] = hmac_hex
+        if verbose:
+            print(f"  SHA-256: {sha256_hex[:16]}...")
+            print(f"  HMAC:    {hmac_hex[:16]}...")
 
     try:
         req = Request(endpoint, data=elf_data, headers=headers, method="POST")
@@ -409,10 +430,15 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
             print(f"Reloadable ELF: {elf_path}")
             print(f"Size: {elf_path.stat().st_size} bytes")
 
+        # Load HMAC key
+        hmac_key = _load_hmac_key(build_dir)
+        if verbose and hmac_key:
+            print(f"HMAC key loaded ({len(hmac_key)} bytes)")
+
         # Upload and reload
         print(f"Uploading {elf_path.name} to {url}...")
 
-        if _upload_elf(url, elf_path, verbose):
+        if _upload_elf(url, elf_path, verbose, hmac_key=hmac_key):
             print("Upload complete!")
             print("(App will reload at next safe point via hotreload_update_available())")
         else:
@@ -462,6 +488,9 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
             yellow_print(f"  {src_dir.relative_to(project)}")
         yellow_print(f"[hotreload] Device URL: {url}")
 
+        # Load HMAC key
+        hmac_key = _load_hmac_key(build_dir)
+
         # Background mode: start watcher in thread and return immediately
         if watch_options.background_mode:
             yellow_print("[hotreload] Running in background mode (combined with monitor/qemu)")
@@ -474,6 +503,7 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
                 debounce=debounce,
                 poll_interval=poll_interval,
                 verbose=verbose,
+                hmac_key=hmac_key,
             )
             return
 
@@ -533,7 +563,7 @@ def action_extensions(base_actions: Dict, project_path: str) -> Dict:
                         continue
 
                     print(f"Uploading {elf_path.name}...")
-                    if _upload_elf(url, elf_path, verbose):
+                    if _upload_elf(url, elf_path, verbose, hmac_key=hmac_key):
                         print("Upload complete (app will reload at next safe point)")
                     else:
                         print("Upload FAILED!")
