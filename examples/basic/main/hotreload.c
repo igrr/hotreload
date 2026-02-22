@@ -5,7 +5,8 @@
  * 1. Connects to WiFi
  * 2. Loads a reloadable ELF module from flash
  * 3. Starts an HTTP server for over-the-air updates
- * 4. Periodically calls the reloadable function to show updates
+ * 4. Main loop calls reloadable functions, then checks for updates
+ *    at a safe point where no reloadable code is on the stack
  *
  * To update the code at runtime:
  *   idf.py reload --url http://<device-ip>:8080
@@ -51,41 +52,29 @@ void app_main(void)
     ESP_LOGI(TAG, "Connected!");
 
     // Load the reloadable ELF from flash
-    ESP_LOGI(TAG, "Loading reloadable module...");
     hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
-    ret = hotreload_load(&config);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to load reloadable module: %s", esp_err_to_name(ret));
-        return;
-    }
-    ESP_LOGI(TAG, "Module loaded successfully!");
-
-    // Initialize and call the reloadable function
+    ESP_ERROR_CHECK(hotreload_load(&config));
     reloadable_init();
-    reloadable_hello("World");
 
-    // Start the HTTP server for hot reload
-    ESP_LOGI(TAG, "Starting hot reload server...");
+    // Start the HTTP server
     hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
-    ret = hotreload_server_start(&server_config);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start server: %s", esp_err_to_name(ret));
-        return;
-    }
+    ESP_ERROR_CHECK(hotreload_server_start(&server_config));
 
-    ESP_LOGI(TAG, "");
     ESP_LOGI(TAG, "Hot reload server running on port 8080");
     ESP_LOGI(TAG, "To update code: idf.py reload --url http://<device-ip>:8080");
     ESP_LOGI(TAG, "To watch and auto-reload: idf.py watch --url http://<device-ip>:8080");
-    ESP_LOGI(TAG, "");
 
-    // Main loop - periodically call the reloadable function
-    // After a reload, the new code will be called automatically
-    int counter = 0;
+    // Main loop
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        counter++;
-        ESP_LOGI(TAG, "Calling reloadable function (iteration %d):", counter);
-        reloadable_hello("from main loop");
+        reloadable_hello("World");
+
+        // Check for updates at a safe point (no reloadable code on the stack)
+        if (hotreload_update_available()) {
+            ESP_LOGI(TAG, "Update available, reloading...");
+            ESP_ERROR_CHECK(hotreload_reload(&config));
+            reloadable_init();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }

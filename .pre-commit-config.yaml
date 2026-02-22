@@ -20,6 +20,12 @@ repos:
     -   id: astyle_py
         args: ['--style=otbs', '--attach-namespaces', '--attach-classes', '--indent=spaces=4', '--convert-tabs', '--align-pointer=name', '--align-reference=name', '--keep-one-line-statements', '--pad-header', '--pad-oper']
 
+-   repo: https://github.com/igrr/code_snippet_to_doc.git
+    rev: v0.1.0
+    hooks:
+    -   id: code_snippet_to_doc
+        args: [--input=README.md]
+
 -   repo: https://github.com/espressif/doxybook
     rev: v0.1.0
     hooks:
