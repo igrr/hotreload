@@ -41,7 +41,7 @@ and you want to iterate on `do_work`. This component allows you to do so, withou
 
 ### 1. Move the Function into a Reloadable Component
 
-If the code you want to reload is not yet in a separate component, create one and move the code there:
+If the code you want to reload is not yet in a separate component, create one and move the code there. Here's what the [basic example](examples/basic/) component looks like:
 
 ```
 components/reloadable/
@@ -51,24 +51,39 @@ components/reloadable/
 └── reloadable.c
 ```
 
-**reloadable.h**:
-```c
-#pragma once
+**reloadable.h** ([source](examples/basic/components/reloadable/include/reloadable.h)):
+<!-- code_snippet_start:examples/basic/components/reloadable/include/reloadable.h:/void reloadable_init/:/void reloadable_hello/+ -->
 
-void do_work(void);
+```c
+void reloadable_init(void);
+void reloadable_hello(const char *name);
 ```
 
-**reloadable.c**:
-```c
-#include <stdio.h>
-#include "reloadable.h"
+<!-- code_snippet_end -->
 
-void do_work(void) {
-    printf("Hello from reloadable code!\n");
+**reloadable.c** ([source](examples/basic/components/reloadable/reloadable.c)):
+<!-- code_snippet_start:examples/basic/components/reloadable/reloadable.c:/static int reloadable_hello_count/:999 -->
+
+```c
+static int reloadable_hello_count;
+static const char *reloadable_greeting = "Hello";
+
+void reloadable_init(void)
+{
+    reloadable_hello_count = 0;
+}
+
+void reloadable_hello(const char *name)
+{
+    printf("%s, %s, from %s! %d\n", reloadable_greeting, name, esp_get_idf_version(), reloadable_hello_count++);
 }
 ```
 
+<!-- code_snippet_end -->
+
 Add `RELOADABLE` option to `idf_component_register` call in your **CMakeLists.txt**:
+<!-- code_snippet_start:examples/basic/components/reloadable/CMakeLists.txt:/idf_component/:/)/+ -->
+
 ```cmake
 idf_component_register(
     RELOADABLE
@@ -78,6 +93,8 @@ idf_component_register(
 )
 ```
 
+<!-- code_snippet_end -->
+
 You can also make an existing component reloadable via sdkconfig without modifying its CMakeLists.txt:
 
 ```
@@ -86,30 +103,37 @@ CONFIG_HOTRELOAD_COMPONENTS="reloadable"
 
 ### 2. Update the Application Code
 
-Modify your main loop to load the reloadable code and check for updates:
+Load the reloadable ELF at startup:
+
+<!-- code_snippet_start:examples/basic/main/hotreload.c:/hotreload_config_t config/:/hotreload_load/+ -->
 
 ```c
-#include "hotreload.h"
-#include "reloadable.h"      // Your reloadable API (contains do_work)
-
-void app_main(void) {
-    init();
-
-    // Load the reloadable ELF from flash
     hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(hotreload_load(&config));
+```
 
-    while (true) {
-        do_work();
+<!-- code_snippet_end -->
+
+In your main loop, check for updates at a safe point where no reloadable code is on the call stack:
+
+<!-- code_snippet_start:examples/basic/main/hotreload.c:/while (1)/:r/^    }$/+ -->
+
+```c
+    while (1) {
+        reloadable_hello("World");
 
         // Check for updates at a safe point (no reloadable code on the stack)
         if (hotreload_update_available()) {
-            printf("Update available, reloading...\n");
-            hotreload_reload(&config);
+            ESP_LOGI(TAG, "Update available, reloading...");
+            ESP_ERROR_CHECK(hotreload_reload(&config));
+            reloadable_init();
         }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
-}
 ```
+
+<!-- code_snippet_end -->
 
 If you need to suspend or reinitialize something when the code is reloaded (e.g. background tasks that call reloadable functions), do so before and after the reload:
 
@@ -157,37 +181,7 @@ Or use the HTTP server for over-the-air updates (see below).
 
 ## HTTP Server for OTA Reload
 
-Start the HTTP server to enable over-the-air updates. The server uses a **cooperative reload** model: it receives uploads but does NOT automatically trigger reload. Your application must poll for updates and reload at safe points.
-
-```c
-#include "hotreload.h"
-
-void app_main(void) {
-    // Initialize WiFi first...
-
-    // Load initial code
-    hotreload_config_t config = HOTRELOAD_CONFIG_DEFAULT();
-    hotreload_load(&config);
-
-    // Start HTTP server (receives uploads, does NOT auto-reload)
-    hotreload_server_config_t server_config = HOTRELOAD_SERVER_CONFIG_DEFAULT();
-    hotreload_server_start(&server_config);
-
-    // Main loop with cooperative reload
-    while (1) {
-        // Call reloadable functions
-        reloadable_do_work();
-
-        // Check for updates at safe point (no reloadable code on stack)
-        if (hotreload_update_available()) {
-            printf("Update available, reloading...\n");
-            hotreload_reload(&config);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
-```
+Start the HTTP server to enable over-the-air updates. The server uses a **cooperative reload** model: it receives uploads but does NOT automatically trigger reload. Your application must poll for updates and reload at safe points. See the [basic example](examples/basic/) for a complete working application.
 
 ### HTTP Endpoints
 
