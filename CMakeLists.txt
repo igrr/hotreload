@@ -17,7 +17,7 @@ set(srcs
 if(IDF_VERSION_MAJOR GREATER_EQUAL 6)
     list(APPEND srcs "port/hotreload_crypto_psa.c")
 else()
-    message(FATAL_ERROR "IDF 5.x crypto backend not yet implemented")
+    list(APPEND srcs "port/hotreload_crypto_mbedcrypto.c")
 endif()
 
 # Add architecture-specific relocation handling
